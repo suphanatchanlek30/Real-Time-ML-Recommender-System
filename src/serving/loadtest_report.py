@@ -130,6 +130,7 @@ def plot(series: dict, title: str, out: Path) -> None:
         ax[0, 1].set_yscale("log")
 
     ax[1, 0].plot(*xy("errors"), color="#d6403f", label="error rate (%)")
+    ax[1, 0].set_ylim(0, max(1.0, *[v for _, v in series.get("errors", [])] or [1.0]))
     ax[1, 0].set(title="Errors and requests in flight", ylabel="% of requests", xlabel="seconds")
     twin = ax[1, 0].twinx()
     twin.plot(*xy("inflight"), color="#7b5ea7", label="in flight")

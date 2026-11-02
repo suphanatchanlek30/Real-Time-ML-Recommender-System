@@ -57,6 +57,9 @@ services:
       FEATURES_DIR: /data/features
       FEATURES_SNAPSHOT: ${FEATURES_SNAPSHOT}
       ADMIN_TOKEN: ${ADMIN_TOKEN}
+      OMP_NUM_THREADS: ${COMPUTE_THREADS}        # LightGBM
+      OPENBLAS_NUM_THREADS: ${COMPUTE_THREADS}   # numpy matrix products
+      MKL_NUM_THREADS: ${COMPUTE_THREADS}
     volumes:
       - ./models:/models:ro
       - ./data/features:/data/features:ro

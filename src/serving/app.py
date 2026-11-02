@@ -56,6 +56,37 @@ class Recommendation(BaseModel):
     degraded: bool
 
 
+class MetricsMiddleware:
+    """Request metrics as a plain ASGI middleware.
+
+    The decorator-based `@app.middleware("http")` wraps every request in extra tasks and streams;
+    this does the same bookkeeping without them (about a third of the time per request).
+    """
+
+    def __init__(self, app, m: dict):
+        self.app, self.m = app, m
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        m, endpoint, status = self.m, scope["path"], 500  # unless a response starts, it is an error
+        start = time.perf_counter()
+
+        async def send_and_note_status(message):
+            nonlocal status
+            if message["type"] == "http.response.start":
+                status = message["status"]
+            await send(message)
+
+        m["in_progress"].inc()
+        try:
+            await self.app(scope, receive, send_and_note_status)
+        finally:  # an unhandled error still counts, as a 500
+            m["in_progress"].dec()
+            m["latency"].labels(endpoint).observe(time.perf_counter() - start)
+            m["requests"].labels(endpoint, status).inc()
+
+
 def build_recommender(settings: Settings) -> Recommender:
     """Load the bundle and the item tables and check that they belong together."""
     bundle = load_bundle(settings.model_dir)
@@ -131,18 +162,7 @@ def create_app(
 
     app = FastAPI(title="Recommender API", lifespan=lifespan)
 
-    @app.middleware("http")
-    async def observe(request: Request, call_next):
-        start, endpoint, status = time.perf_counter(), request.url.path, 500
-        m["in_progress"].inc()
-        try:
-            response = await call_next(request)
-            status = response.status_code
-            return response
-        finally:  # an unhandled error still counts, as a 500
-            m["in_progress"].dec()
-            m["latency"].labels(endpoint).observe(time.perf_counter() - start)
-            m["requests"].labels(endpoint, status).inc()
+    app.add_middleware(MetricsMiddleware, m=m)
 
     def model() -> Recommender:
         rec = app.state.rec
