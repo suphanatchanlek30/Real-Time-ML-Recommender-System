@@ -21,7 +21,7 @@ make install-all        # ติดตั้ง polars, pandera, implicit, light
 ## 1. เช็กว่าทุกอย่างพร้อม
 
 ```bash
-make test               # ต้องผ่านทั้งหมด (66 tests, อีก 4 ข้ามเพราะต้องมี Docker)
+make test               # ต้องผ่านทั้งหมด (89 tests, อีก 4 ข้ามเพราะต้องมี Docker)
 ls data/raw             # ต้องเห็น events.csv, item_properties_part*.csv, category_tree.csv
 ```
 

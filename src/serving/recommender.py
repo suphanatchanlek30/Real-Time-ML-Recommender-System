@@ -4,32 +4,20 @@ Mirrors the offline path (training/dataset.py + training/ranker.py) step for ste
 tests check that both give the same features and the same ranking.
 """
 
+import math
 from dataclasses import dataclass
 from datetime import datetime
 
 import numpy as np
-import polars as pl
 
-from src.features.spec import BY_GROUP, FEATURE_COLUMNS
-from src.features.user import derive_user_features
+from src.features.spec import BY_GROUP, DECAY_TAU_DAYS, FEATURE_COLUMNS
 from src.serving.bundle import Bundle
 from src.serving.feature_store import UserData
 from src.serving.tables import ItemTables
-from src.serving.timeutil import DAY_MS, from_ms, to_ms
+from src.serving.timeutil import DAY_MS, to_ms
 
 COL = {name: i for i, name in enumerate(FEATURE_COLUMNS)}
 USER_COLS = [f.name for f in BY_GROUP["user"]]
-STATE_SCHEMA = {
-    "visitorid": pl.Int64,
-    "n_view": pl.Int64,
-    "n_cart": pl.Int64,
-    "n_buy": pl.Int64,
-    "n_sessions": pl.Int64,
-    "first_ts": pl.Datetime("ms"),
-    "last_ts": pl.Datetime("ms"),
-    "decay_interest": pl.Float64,
-    "decay_actions": pl.Float64,
-}
 
 
 @dataclass
@@ -40,27 +28,59 @@ class Result:
 
 
 def user_feature_values(user_id: int, state: dict, now_ms: int) -> dict[str, float]:
-    """u_* features from the raw state at time `now` (same code as the offline path)."""
-    row = {"visitorid": [user_id], **{k: [state[k]] for k in STATE_SCHEMA if k != "visitorid"}}
-    state_df = pl.DataFrame(row, schema=STATE_SCHEMA)
-    return derive_user_features(state_df, from_ms(now_ms)).select(USER_COLS).row(0, named=True)
+    """u_* features from the raw state at time `now`.
+
+    Plain Python on purpose: building a one-row polars frame for every request cost ~1 ms, more
+    than everything else in the request. The formulas are those of features/user.py
+    `derive_user_features`; the parity tests compare the two on random data.
+    """
+    n_view, n_cart, n_buy = state["n_view"], state["n_cart"], state["n_buy"]
+    n_events = n_view + n_cart + n_buy
+    since_last = (now_ms - to_ms(state["last_ts"])) / DAY_MS
+    fade = math.exp(-since_last / DECAY_TAU_DAYS)  # brings the decayed sums forward to `now`
+    return {
+        "u_n_events": n_events,
+        "u_n_view": n_view,
+        "u_n_cart": n_cart,
+        "u_n_buy": n_buy,
+        "u_n_sessions": state["n_sessions"],
+        "u_cart_per_view": n_cart / max(n_view, 1),
+        "u_buy_per_event": n_buy / n_events,
+        "u_days_since_last": since_last,
+        "u_days_since_first": (now_ms - to_ms(state["first_ts"])) / DAY_MS,
+        "u_decay_interest": state["decay_interest"] * fade,
+        "u_decay_actions": state["decay_actions"] * fade,
+    }
 
 
 def pair_feature_matrix(items: np.ndarray, data: UserData, item_cat: dict, now_ms: int):
-    """p_* features of one user against each candidate, from the Redis hashes."""
+    """p_* features of one user against each candidate, from the Redis hashes.
+
+    Walks the user's own hash fields (a few per touched item) instead of looking up 4 keys for
+    each of the 200 candidates, and fills the category share one category at a time.
+    """
+    n = len(items)
+    out = np.zeros((n, 5))
+    out[:, 3] = np.nan  # days since the last touch: unknown until the user touched the item
+    position = {item: i for i, item in enumerate(items.tolist())}
+    column = {"v": 0, "c": 1, "b": 2}
+    for field, value in data.items.items():
+        code, _, item = field.partition(":")
+        i = position.get(int(item))
+        if i is None:
+            continue
+        if code == "t":
+            out[i, 3] = (now_ms - int(value)) / DAY_MS
+        else:
+            out[i, column[code]] = int(value)
+
     n_events = 0
     if data.state:
         n_events = data.state["n_view"] + data.state["n_cart"] + data.state["n_buy"]
-    out = np.zeros((len(items), 5))
-    for n, item in enumerate(items.tolist()):
-        out[n, 0] = int(data.items.get(f"v:{item}", 0))
-        out[n, 1] = int(data.items.get(f"c:{item}", 0))
-        out[n, 2] = int(data.items.get(f"b:{item}", 0))
-        last = data.items.get(f"t:{item}")
-        out[n, 3] = (now_ms - int(last)) / DAY_MS if last is not None else np.nan
-        cat = item_cat.get(item)
-        if cat is not None and n_events:
-            out[n, 4] = int(data.cats.get(str(cat), 0)) / n_events
+    if n_events and data.cats:
+        category = np.array([item_cat.get(item, np.nan) for item in items.tolist()], dtype=float)
+        for cat, count in data.cats.items():
+            out[category == int(cat), 4] = int(count) / n_events
     return out
 
 
@@ -69,13 +89,17 @@ class Recommender:
         self.bundle, self.tables, self.n = bundle, tables, n_candidates
         # event-time clock to use when Redis has none yet: the time of the batch snapshot
         self.default_now_ms = to_ms(datetime.fromisoformat(tables.as_of))
+        self._popular_items = np.array(bundle.popular[:n_candidates])
+        self._popular_scores = np.full(len(self._popular_items), np.nan)
+        # ranked lists that are the same for every user in the same situation, see recommend()
+        self._shared: dict[bool, list[tuple[int, float]]] = {}
 
     def candidates(self, user_id: int):
         """(items, als scores, retrieval name). ALS for users it knows, popular list otherwise."""
         b, n = self.bundle, self.n
         row = b.user_row.get(int(user_id))
         if row is None:
-            return np.array(b.popular[:n]), np.full(min(n, len(b.popular)), np.nan), "popular"
+            return self._popular_items, self._popular_scores, "popular"
         scores = b.user_factors[row] @ b.item_factors.T
         top = np.argpartition(-scores, n - 1)[:n]
         top = top[np.argsort(-scores[top])]
@@ -101,13 +125,25 @@ class Recommender:
         return X
 
     def recommend(self, user_id: int, k: int, data: UserData | None) -> Result:
-        """`data` is None when Redis could not be read: same path with empty user/pair features."""
+        """`data` is None when Redis could not be read: same path with empty user/pair features.
+
+        A user ALS does not know and who has no history gets the same 200 popular candidates and
+        the same (empty) features as every such user, so the ranked list is identical for all of
+        them: it is computed once per model and reused. This is half of the real traffic.
+        """
         items, a_score, retrieval = self.candidates(user_id)
+        shared = retrieval == "popular" and (data is None or not (data.state or data.items))
+        if shared and (data is None) in self._shared:
+            return Result(self._shared[data is None][:k], retrieval, data is None)
+
         X = self.features(user_id, items, a_score, retrieval, data)
         scores = self.bundle.booster.predict(X)
-        order = np.argsort(-scores, kind="stable")[:k]
+        order = np.argsort(-scores, kind="stable")
+        if shared:  # keep the whole ranking, any k is a slice of it
+            self._shared[data is None] = [(int(items[i]), float(scores[i])) for i in order]
+            return Result(self._shared[data is None][:k], retrieval, data is None)
         return Result(
-            items=[(int(items[i]), float(scores[i])) for i in order],
+            items=[(int(items[i]), float(scores[i])) for i in order[:k]],
             retrieval=retrieval,
             degraded=data is None,
         )

@@ -26,6 +26,7 @@ from prometheus_client import (
     Counter,
     Gauge,
     Histogram,
+    ProcessCollector,
     generate_latest,
 )
 from pydantic import BaseModel
@@ -38,7 +39,8 @@ from src.serving.tables import load_tables
 from src.serving.timeutil import from_ms
 
 log = logging.getLogger("api")
-LATENCY_BUCKETS = (0.005, 0.01, 0.02, 0.035, 0.05, 0.075, 0.1, 0.15, 0.25, 0.5, 1.0)
+# up to 5 s so that p99 stays readable when a stress test pushes the service past its limit
+LATENCY_BUCKETS = (0.005, 0.01, 0.02, 0.035, 0.05, 0.075, 0.1, 0.15, 0.25, 0.5, 1.0, 2.5, 5.0)
 
 
 class ScoredItem(BaseModel):
@@ -52,6 +54,37 @@ class Recommendation(BaseModel):
     source: str
     retrieval: str
     degraded: bool
+
+
+class MetricsMiddleware:
+    """Request metrics as a plain ASGI middleware.
+
+    The decorator-based `@app.middleware("http")` wraps every request in extra tasks and streams;
+    this does the same bookkeeping without them (about a third of the time per request).
+    """
+
+    def __init__(self, app, m: dict):
+        self.app, self.m = app, m
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        m, endpoint, status = self.m, scope["path"], 500  # unless a response starts, it is an error
+        start = time.perf_counter()
+
+        async def send_and_note_status(message):
+            nonlocal status
+            if message["type"] == "http.response.start":
+                status = message["status"]
+            await send(message)
+
+        m["in_progress"].inc()
+        try:
+            await self.app(scope, receive, send_and_note_status)
+        finally:  # an unhandled error still counts, as a 500
+            m["in_progress"].dec()
+            m["latency"].labels(endpoint).observe(time.perf_counter() - start)
+            m["requests"].labels(endpoint, status).inc()
 
 
 def build_recommender(settings: Settings) -> Recommender:
@@ -102,7 +135,12 @@ def create_app(
         ),
         "reloads": Counter("model_reloads_total", "Reload attempts", ["result"], registry=registry),
         "model": Gauge("model_info", "Loaded model version", ["version"], registry=registry),
+        # how many requests are being handled right now: it grows when the service saturates
+        "in_progress": Gauge(
+            "http_requests_in_progress", "Requests being handled", registry=registry
+        ),
     }
+    ProcessCollector(registry=registry)  # CPU, memory, open files of the API process (Linux)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -124,14 +162,7 @@ def create_app(
 
     app = FastAPI(title="Recommender API", lifespan=lifespan)
 
-    @app.middleware("http")
-    async def observe(request: Request, call_next):
-        start = time.perf_counter()
-        response = await call_next(request)
-        endpoint = request.url.path
-        m["latency"].labels(endpoint).observe(time.perf_counter() - start)
-        m["requests"].labels(endpoint, response.status_code).inc()
-        return response
+    app.add_middleware(MetricsMiddleware, m=m)
 
     def model() -> Recommender:
         rec = app.state.rec

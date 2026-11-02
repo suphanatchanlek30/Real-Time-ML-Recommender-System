@@ -17,11 +17,13 @@ from collections import Counter
 
 import polars as pl
 import redis
+from prometheus_client import start_http_server
 from pydantic import ValidationError
 
 from src.serving.config import Settings
 from src.serving.feature_store import Event, advance_clock, handle_event
 from src.streaming import config as K
+from src.streaming import metrics as M
 
 log = logging.getLogger("consumer")
 
@@ -63,6 +65,7 @@ def main() -> None:
             "auto.offset.reset": "earliest",
         }
     )
+    start_http_server(K.METRICS_PORT)  # /metrics for Prometheus
     ensure_topic()
     consumer.subscribe([K.TOPIC])
     stop = {"now": False}
@@ -73,6 +76,7 @@ def main() -> None:
     log.info("consuming %s from %s as group %s", K.TOPIC, K.BOOTSTRAP, K.GROUP)
     while not stop["now"]:
         messages = consumer.consume(num_messages=500, timeout=1.0)
+        batch_started = time.perf_counter()
         newest, handled = 0, 0
         for msg in messages:
             if msg.error():
@@ -84,9 +88,13 @@ def main() -> None:
             position = (msg.topic(), msg.partition(), msg.offset())
             outcome, ts = process_message(r, msg.value(), item_cat, position)
             stats[outcome] += 1
+            M.EVENTS.labels(outcome).inc()
             newest = max(newest, ts or 0)
         if newest:
             advance_clock(r, newest)
+            M.EVENT_CLOCK.set(newest / 1000)
+        if handled:
+            M.BATCH_SECONDS.observe(time.perf_counter() - batch_started)
         if handled:
             try:
                 consumer.commit(asynchronous=False)
@@ -101,6 +109,8 @@ def main() -> None:
                 if commit_failures >= 20:
                     raise RuntimeError("offsets cannot be committed, restarting") from err
         if time.time() - last_log > 10:
+            for partition, lag in M.kafka_lag(consumer).items():
+                M.KAFKA_LAG.labels(partition).set(lag)
             log.info("processed %s", dict(stats))
             last_log = time.time()
     consumer.close()

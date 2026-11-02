@@ -3,3 +3,4 @@ pytest
 ruff
 fakeredis
 httpx
+matplotlib

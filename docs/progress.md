@@ -12,7 +12,7 @@
 | ✅ | 5. Feature engineering | `b0f1e42` |
 | ✅ | 6. ALS + Ranker | `c819ad9` |
 | ✅ | 7. Serving, Streaming, Docker | `fa8ffa9`, `b306328`, `9da1f4b`, `c5b1c8b` |
-| ⬜ | 8. Load test และ Monitoring | - |
+| ✅ | 8. Load test และ Monitoring | `fc8667e`, `97fdfb4`, `a02f14d`, `37271b4`, `f0f4a9b` |
 
 ---
 
@@ -235,7 +235,37 @@
 - MLflow ยังอยู่บนเครื่อง (SQLite) ไม่อยู่ใน compose; API worker เดียว; `/admin/reload` ป้องกันด้วย `ADMIN_TOKEN` ถ้าตั้งไว้เท่านั้น
 - Kafka/consumer ทดสอบกับ stack จริงบนเครื่องเดียว ไม่ได้ทดสอบหลาย consumer หรือหลาย broker
 
+## 8. Load test และ Monitoring
+โค้ด: [monitoring/](../monitoring/), [loadtest/k6.js](../loadtest/k6.js), [.github/workflows/ci.yml](../.github/workflows/ci.yml) วิธีรันอยู่ใน [runbook-loadtest.md](runbook-loadtest.md) และผลเต็มอยู่ใน [loadtest.md](loadtest.md)
+
+| ส่วน | ทำอะไร |
+| --- | --- |
+| Prometheus | scrape API และ consumer ทุก 5 วินาที และรับ metrics ที่ k6 ส่งมา (remote write) |
+| Grafana | dashboard `Recommender: service overview` ถูกสร้างอัตโนมัติจากไฟล์: RPS, error rate, p50/p95/p99 (เส้นเป้า 100 ms), แหล่งที่มาของคำตอบ, เวลาอ่าน Redis, CPU/RAM, Kafka lag, และฝั่ง k6 |
+| k6 | smoke / load / stress พร้อม threshold (p95 < 100 ms, error < 1%) ผู้ใช้ที่สุ่มมาจาก 3 กลุ่มตามสัดส่วนจริง |
+| รายงาน | สคริปต์ดึงกราฟจาก Prometheus ของแต่ละรอบ และหาจุดที่ระบบเริ่มพัง |
+| CI | GitHub Actions: ruff, pytest, ตรวจ compose, build image ทั้งสอง |
+
+**ผลที่ได้ (ก่อน → หลังปรับปรุง):**
+
+| | ก่อน | หลัง |
+| --- | --- | --- |
+| Load 100 VUs: p95 | 166 ms (ไม่ผ่าน) | **30 ms** (ผ่าน) |
+| request / วินาที | 401 | **695** |
+| Stress: อัตราที่รักษา p95 < 100 ms | ~300 / วินาที | **~1,360 / วินาที** |
+| CPU ของ API | 9.6 คอร์ | 1.4 คอร์ |
+
+**ปรับปรุงอะไรไปบ้าง (ตามหลักฐานที่วัดได้):**
+1. ผลก่อนปรับเจอว่า API ใช้ CPU ~9.4 คอร์เพื่อรับ ~500 request/วินาที เพราะ thread ของ numpy/LightGBM แย่งกัน จำกัดเป็น 1 thread (`COMPUTE_THREADS` ใน `.env`) CPU ลด 5 เท่า แต่ throughput แทบไม่ขึ้น (401 → 427)
+2. Profile ต่อ request ชี้ว่าการสร้าง DataFrame polars เพื่อคำนวณฟีเจอร์ผู้ใช้กิน ~0.94 ms จึงเปลี่ยนเป็น Python ล้วน (test เทียบกับโค้ด offline) พร้อมปรับการหา pair features, middleware, และคำนวณคำตอบของผู้ใช้ใหม่ครั้งเดียวต่อโมเดล ผลคือ 401 → 695 request/วินาที และ p95 166 → 30 ms
+
+**ข้อจำกัดที่รู้อยู่:**
+- ทุกอย่างรันบนเครื่องเดียว (k6 อยู่เครื่องเดียวกับ server) และวัดแต่ละชุดแค่รอบเดียว ตัวเลขเหมาะกับการเทียบก่อน/หลัง ไม่ใช่ความจุจริง
+- ระบบล้นแล้ว "ช้าลง" ไม่ได้ "ตอบ error" (ไม่มี load shedding) และยังมี worker เดียว: ความจุเพิ่มได้อีกด้วยหลาย worker แต่ต้องทำ Prometheus แบบ multiprocess และให้ reload แจ้งทุก worker
+- ยังไม่มี screenshot ของ Grafana ในรายงาน (ตรวจแล้วว่า query ของทุก panel ทำงานและ dashboard โหลดได้ แต่ยังไม่ได้ดูภาพที่วาดจริง) ใช้กราฟที่สร้างจาก Prometheus ใน `docs/loadtest/` แทน
+- GitHub Actions ยังไม่เคยรันบน GitHub (จำลองบนเครื่องใน venv สะอาดไม่มีข้อมูลแล้วผ่าน) จะรันครั้งแรกเมื่อเปิด PR
+
 ---
 
 ## ขั้นต่อไป
-**8. Load test และ Monitoring:** Prometheus + Grafana (`/metrics` พร้อมแล้ว), k6 แบบ smoke/load/stress พร้อม threshold (เป้าหมาย p95 < 100 ms, error < 1%) เทียบก่อน/หลัง optimize และ GitHub Actions
+ครบทุกขั้นตามแผนแล้ว งานต่อยอดที่เหลืออยู่ในหัวข้อ ข้อจำกัด ของแต่ละขั้น เช่น หลาย worker, session-based retrieval, รันบน Test set ครั้งเดียวสำหรับโมเดลสุดท้าย

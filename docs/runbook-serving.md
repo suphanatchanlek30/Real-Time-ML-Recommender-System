@@ -43,7 +43,7 @@ make pull-model                  # -> models/champion/ (als.npz, ranker.txt, sch
 ## 2. เปิดระบบ
 
 ```bash
-make up                          # build image และเปิด kafka, redis, api, consumer (ครั้งแรก ~2 นาที)
+make up                          # build image และเปิด kafka, redis, api, consumer, prometheus, grafana (ครั้งแรก ~2 นาที)
 curl localhost:8000/health       # {"status":"ok", "model_version":"1", ...} (พอร์ตตาม API_PORT ใน .env)
 ```
 
@@ -116,4 +116,4 @@ make down
 | `/health` ตอบ `degraded` | Redis ไม่พร้อม: `docker compose ps` แล้วลอง `docker compose restart redis` จากนั้น `make load-redis` |
 | consumer ไม่ประมวลผล | ดู `make logs` ถ้า topic เพิ่งถูกสร้างใหม่ให้รัน `docker compose restart consumer` |
 | อยากเริ่มข้อมูลสดใหม่ทั้งหมด | `make replay` (ทำให้ใหม่ทุกอย่างเอง) |
-| RAM ไม่พอ | ระบบใช้ ~2.7 GB (Kafka ~1 GB, Redis ~0.8 GB, API ~0.7 GB) เพิ่ม RAM ให้ Docker Desktop ที่ Settings > Resources |
+| RAM ไม่พอ | Kafka, Redis, API และ consumer รวมกันใช้ ~2.7 GB (Kafka ~1 GB, Redis ~0.8 GB, API ~0.7 GB) ยังไม่นับ Prometheus และ Grafana เพิ่ม RAM ให้ Docker Desktop ที่ Settings > Resources |

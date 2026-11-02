@@ -14,3 +14,5 @@ TOPIC = os.environ.get("KAFKA_TOPIC", "user-events")
 GROUP = os.environ.get("KAFKA_GROUP", "feature-updater")
 # events of one visitor share a key, hence a partition, hence stay in order
 PARTITIONS = int(os.environ.get("KAFKA_PARTITIONS", "3"))
+# the consumer serves Prometheus metrics on this port (inside its container)
+METRICS_PORT = int(os.environ.get("CONSUMER_METRICS_PORT", "9100"))

@@ -67,3 +67,23 @@ def test_replayed_events_are_time_ordered_and_start_at_the_snapshot(tmp_path, mo
     out = load_events(T0.replace(day=2))
     assert out["visitorid"].to_list() == [3, 1]  # day 1 is before the start; the rest is sorted
     assert load_events(T0.replace(day=1), limit=1).height == 1
+
+
+def test_kafka_lag_is_high_watermark_minus_position():
+    from types import SimpleNamespace
+
+    from src.streaming.metrics import kafka_lag
+
+    partitions = {0: (120, 100), 1: (50, 50), 2: (30, -1001)}  # partition: (high, position)
+
+    class StubConsumer:
+        def assignment(self):
+            return [SimpleNamespace(partition=p) for p in partitions]
+
+        def position(self, tps):
+            return [SimpleNamespace(offset=partitions[tps[0].partition][1])]
+
+        def get_watermark_offsets(self, tp, cached=True):
+            return 0, partitions[tp.partition][0]
+
+    assert kafka_lag(StubConsumer()) == {0: 20, 1: 0}  # no position yet -> not reported

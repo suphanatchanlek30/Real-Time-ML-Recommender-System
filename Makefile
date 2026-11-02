@@ -1,4 +1,4 @@
-.PHONY: install install-train lint format test etl eval-baseline features tune-als train mlflow-ui pull-model load-redis up down replay logs smoke install-all env
+.PHONY: install install-train lint format test etl eval-baseline features tune-als train mlflow-ui pull-model load-redis up down replay logs smoke install-all env loadtest loadtest-smoke loadtest-stress loadtest-users
 
 install:
 	pip install -r requirements-dev.txt
@@ -67,3 +67,17 @@ logs:
 # end-to-end check against the running stack (make up && make replay first)
 smoke:
 	RUN_STACK_TESTS=1 pytest tests/test_smoke_stack.py -v
+
+# ---------- load test (needs: make up, make replay) ----------
+# user ids that look like the real traffic -> loadtest/users.json
+loadtest-users:
+	python -m src.serving.make_loadtest_users
+
+loadtest-smoke:
+	K6_SCENARIO=smoke docker compose --profile loadtest run --rm k6 run --quiet --out experimental-prometheus-rw /loadtest/k6.js
+
+loadtest:
+	K6_SCENARIO=load docker compose --profile loadtest run --rm k6 run --quiet --out experimental-prometheus-rw /loadtest/k6.js
+
+loadtest-stress:
+	K6_SCENARIO=stress docker compose --profile loadtest run --rm k6 run --quiet --out experimental-prometheus-rw /loadtest/k6.js
