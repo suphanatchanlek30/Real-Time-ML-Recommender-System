@@ -1,0 +1,23 @@
+# Data (large, downloaded from Kaggle)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# MLflow / artifacts
+mlruns/
+artifacts/
+
+# Env / OS
+.env
+.DS_Store
