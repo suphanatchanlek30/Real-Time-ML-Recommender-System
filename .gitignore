@@ -17,6 +17,8 @@ venv/
 
 # MLflow / artifacts
 mlruns/
+mlartifacts/
+mlflow.db
 artifacts/
 
 # Env / OS

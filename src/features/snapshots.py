@@ -3,8 +3,9 @@
 A feature table is always "what was known before `as_of`": every feature function keeps only
 events with ts < as_of, so nothing from the period we later predict can leak in.
 
-    rank_train   as_of = val_start - 7 days   labels: the last 7 days of Train
-                 (the Ranker learns on this: features from the past, labels from the "future")
+    rank_1..N    as_of = val_start - 7k days  labels: the 7 days after as_of, all inside Train
+                 (the Ranker learns on these: features from the past, labels from the "future";
+                 several rolling snapshots give it enough users with a positive label)
     val          as_of = val_start            labels: the Val period (model selection)
     test         as_of = test_start           labels: the Test period (history = Train + Val)
 
@@ -30,12 +31,18 @@ class Snapshot:
 
 
 def make_snapshots(
-    events: pl.DataFrame, cfg: SplitConfig = SplitConfig(), label_days: int = 7
+    events: pl.DataFrame,
+    cfg: SplitConfig = SplitConfig(),
+    label_days: int = 7,
+    n_rank: int = 4,
 ) -> list[Snapshot]:
     val_start, test_start = split_boundaries(events, cfg)
-    rank_start = val_start - timedelta(days=label_days)
+    rank = []
+    for k in range(n_rank, 0, -1):  # oldest first: rank_N ... rank_1
+        start = val_start - timedelta(days=label_days * k)
+        rank.append(Snapshot(f"rank_{k}", start, start, start + timedelta(days=label_days)))
     return [
-        Snapshot("rank_train", rank_start, rank_start, val_start),
+        *rank,
         Snapshot("val", val_start, val_start, test_start),
         Snapshot("test", test_start, test_start, None),
     ]

@@ -274,7 +274,9 @@ def test_schema_rejects_out_of_range_values():
 
 def test_snapshots_follow_the_etl_split_boundaries():
     ev = events([(d, 1, 1, "view") for d in range(0, 40)])
-    rank, val, test = make_snapshots(ev)
-    assert val.as_of == rank.label_end and test.as_of == val.label_end
-    assert rank.as_of == val.as_of - timedelta(days=7)
+    *rank, val, test = make_snapshots(ev, n_rank=2)
+    assert [r.name for r in rank] == ["rank_2", "rank_1"]
+    assert val.as_of == rank[-1].label_end and test.as_of == val.label_end
+    assert rank[-1].as_of == val.as_of - timedelta(days=7)
+    assert rank[0].label_end == rank[1].as_of  # rolling windows are back to back
     assert test.as_of == ev["ts"].max() - timedelta(days=7)
