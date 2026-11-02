@@ -8,7 +8,7 @@
 | ✅ | 1. Setup repo | `d0d17f7` |
 | ✅ | 2. EDA | `55e89e3`, `96ce9ac` |
 | ✅ | 3. ETL และแบ่งข้อมูลตามเวลา | `4de5fa3` |
-| ✅ | 4. Evaluation และ baseline | `61af077` |
+| ✅ | 4. Evaluation และ baseline | `3386a8a` |
 | ⬜ | 5. Feature engineering | - |
 | ⬜ | 6. ALS + Ranker | - |
 | ⬜ | 7. Serving, Streaming, Docker | - |
