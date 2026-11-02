@@ -179,3 +179,18 @@ def test_no_model_is_reported_not_crashed(fake):
             c.get("/health").status_code == 503 and c.get("/health").json()["status"] == "no_model"
         )
         assert c.get("/recommend", params={"user_id": 1}).status_code == 503
+
+
+def test_unhandled_errors_are_counted_as_500_and_in_progress_returns_to_zero(fake):
+    app = create_app(redis_client=fake, recommender=synthetic_recommender())
+
+    @app.get("/boom")
+    def boom():
+        raise RuntimeError("boom")
+
+    with TestClient(app, raise_server_exceptions=False) as c:
+        assert c.get("/boom").status_code == 500
+        text = c.get("/metrics").text
+        assert 'http_requests_total{endpoint="/boom",status="500"} 1.0' in text
+        assert "http_requests_in_progress 1.0" in text  # only the /metrics request itself
+        assert 'http_request_duration_seconds_bucket{endpoint="/boom",le="5.0"}' in text

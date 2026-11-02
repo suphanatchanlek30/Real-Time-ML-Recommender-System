@@ -26,6 +26,7 @@ from prometheus_client import (
     Counter,
     Gauge,
     Histogram,
+    ProcessCollector,
     generate_latest,
 )
 from pydantic import BaseModel
@@ -38,7 +39,8 @@ from src.serving.tables import load_tables
 from src.serving.timeutil import from_ms
 
 log = logging.getLogger("api")
-LATENCY_BUCKETS = (0.005, 0.01, 0.02, 0.035, 0.05, 0.075, 0.1, 0.15, 0.25, 0.5, 1.0)
+# up to 5 s so that p99 stays readable when a stress test pushes the service past its limit
+LATENCY_BUCKETS = (0.005, 0.01, 0.02, 0.035, 0.05, 0.075, 0.1, 0.15, 0.25, 0.5, 1.0, 2.5, 5.0)
 
 
 class ScoredItem(BaseModel):
@@ -102,7 +104,12 @@ def create_app(
         ),
         "reloads": Counter("model_reloads_total", "Reload attempts", ["result"], registry=registry),
         "model": Gauge("model_info", "Loaded model version", ["version"], registry=registry),
+        # how many requests are being handled right now: it grows when the service saturates
+        "in_progress": Gauge(
+            "http_requests_in_progress", "Requests being handled", registry=registry
+        ),
     }
+    ProcessCollector(registry=registry)  # CPU, memory, open files of the API process (Linux)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -126,12 +133,16 @@ def create_app(
 
     @app.middleware("http")
     async def observe(request: Request, call_next):
-        start = time.perf_counter()
-        response = await call_next(request)
-        endpoint = request.url.path
-        m["latency"].labels(endpoint).observe(time.perf_counter() - start)
-        m["requests"].labels(endpoint, response.status_code).inc()
-        return response
+        start, endpoint, status = time.perf_counter(), request.url.path, 500
+        m["in_progress"].inc()
+        try:
+            response = await call_next(request)
+            status = response.status_code
+            return response
+        finally:  # an unhandled error still counts, as a 500
+            m["in_progress"].dec()
+            m["latency"].labels(endpoint).observe(time.perf_counter() - start)
+            m["requests"].labels(endpoint, status).inc()
 
     def model() -> Recommender:
         rec = app.state.rec
