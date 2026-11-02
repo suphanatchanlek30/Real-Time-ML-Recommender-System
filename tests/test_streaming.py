@@ -40,6 +40,14 @@ def test_consumer_applies_valid_events_and_counts_the_bad_ones():
     assert state["n_view"] == 2 and state["n_sessions"] == 1
 
 
+def test_consumer_skips_a_redelivered_message():
+    r = fakeredis.FakeStrictRedis(decode_responses=True)
+    pos = ("user-events", 2, 40)
+    assert process_message(r, payload(), CATEGORY, pos)[0] == "ok"
+    assert process_message(r, payload(), CATEGORY, pos)[0] == "duplicate"
+    assert read_user(r, 1).state["n_view"] == 1
+
+
 def test_replayed_events_are_time_ordered_and_start_at_the_snapshot(tmp_path, monkeypatch):
     import src.streaming.producer as producer
 

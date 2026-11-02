@@ -1,0 +1,17 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY requirements-serve.txt .
+# the consumer and the producer need no LightGBM, but sharing one requirements file keeps the
+# two images consistent and the build cached
+RUN pip install --no-cache-dir -r requirements-serve.txt
+
+COPY src/__init__.py src/config.py ./src/
+COPY src/features/__init__.py src/features/spec.py src/features/user.py ./src/features/
+COPY src/serving ./src/serving
+COPY src/streaming ./src/streaming
+COPY src/etl/__init__.py src/etl/config.py ./src/etl/
+
+ENV FEATURES_DIR=/data/features FEATURES_SNAPSHOT=val DATA_DIR=/data \
+    REDIS_URL=redis://redis:6379/0 KAFKA_BOOTSTRAP=kafka:9092 PYTHONUNBUFFERED=1
+CMD ["python", "-m", "src.streaming.consumer"]

@@ -102,8 +102,11 @@ def test_new_user_event_creates_state_and_category_counts():
 def test_late_event_is_skipped():
     r = fakeredis.FakeStrictRedis(decode_responses=True)
     ts = to_ms(T0)
-    assert handle_event(r, Event(visitor_id=1, item_id=5, event="view", ts=ts + 5000), ITEM_CAT)
-    assert not handle_event(r, Event(visitor_id=1, item_id=6, event="view", ts=ts), ITEM_CAT)
+    assert (
+        handle_event(r, Event(visitor_id=1, item_id=5, event="view", ts=ts + 5000), ITEM_CAT)
+        == "ok"
+    )
+    assert handle_event(r, Event(visitor_id=1, item_id=6, event="view", ts=ts), ITEM_CAT) == "late"
     assert read_user(r, 1).state["n_view"] == 1
 
 
@@ -136,3 +139,32 @@ def test_timeutil_roundtrip():
     assert from_ms(to_ms(datetime(2015, 9, 4, 2, 59, 47, 788000))) == datetime(
         2015, 9, 4, 2, 59, 47, 788000
     )
+
+
+def snapshot(r) -> dict:
+    """Every user key of Redis with its content (hashes as dicts, the recent list as a list)."""
+    return {
+        k: r.hgetall(k) if r.type(k) == "hash" else r.lrange(k, 0, -1)
+        for k in r.scan_iter("user:*")
+    }
+
+
+def test_redelivered_messages_are_applied_once():
+    """Kafka re-reads the last batch after a crash: the stored offset makes that harmless."""
+    r = fakeredis.FakeStrictRedis(decode_responses=True)
+    ts = to_ms(T0)
+    batch = [
+        (Event(visitor_id=1, item_id=5, event="view", ts=ts), ("user-events", 0, 10)),
+        (Event(visitor_id=1, item_id=6, event="addtocart", ts=ts + 1000), ("user-events", 0, 11)),
+        (Event(visitor_id=2, item_id=5, event="view", ts=ts + 1000), ("user-events", 1, 4)),
+    ]
+    assert [handle_event(r, ev, ITEM_CAT, pos) for ev, pos in batch] == ["ok"] * 3
+    after_first = snapshot(r)
+    # crash before the commit: the same batch is delivered again, plus one new message
+    again = [handle_event(r, ev, ITEM_CAT, pos) for ev, pos in batch]
+    assert again == ["duplicate"] * 3
+    assert snapshot(r) == after_first
+    new = Event(visitor_id=1, item_id=7, event="view", ts=ts + 2000)
+    assert handle_event(r, new, ITEM_CAT, ("user-events", 0, 12)) == "ok"
+    assert read_user(r, 1).state["n_view"] == 2
+    assert r.hgetall("offsets") == {"user-events:0": "12", "user-events:1": "4"}

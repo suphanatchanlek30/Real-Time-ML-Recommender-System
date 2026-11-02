@@ -10,6 +10,7 @@ Layout (all keys per user id `u`; ids are stored as plain integers):
                                                          -> pair features p_n_*, p_days_since_touch
     user:{u}:cats    HASH   {category} -> events in that category   -> p_cat_share
     clock            STRING event time of the newest processed event (epoch ms)
+    offsets          HASH   {topic}:{partition} -> offset of the last applied message
 
 Why `clock`: the data is from 2015, so wall-clock time would make every recency 4000 days and
 every decayed sum 0. All "now" values are event time: the batch load sets it to the snapshot
@@ -34,6 +35,7 @@ from src.features.user import update_user_state
 from src.serving.timeutil import from_ms
 
 CLOCK = "clock"
+OFFSETS = "offsets"
 STATE_INT = ("n_view", "n_cart", "n_buy", "n_sessions")
 STATE_FLOAT = ("decay_interest", "decay_actions")
 CODE = {"view": "v", "addtocart": "c", "transaction": "b"}
@@ -93,19 +95,32 @@ def _encode_state(state: Mapping) -> dict:
     return out
 
 
-def handle_event(r, ev: Event, item_cat: Mapping[int, int]) -> bool:
-    """Apply one event to the user's Redis state. Returns False when it was skipped as late.
+def handle_event(
+    r, ev: Event, item_cat: Mapping[int, int], position: tuple[str, int, int] | None = None
+) -> str:
+    """Apply one event to the user's Redis state. Returns "ok", "late" or "duplicate".
 
-    Pure with respect to everything but Redis, so it is unit-tested with fakeredis. A user's
-    events must arrive in time order (Kafka keeps that per key); an older event is skipped
-    because the decayed sums can only move forward in time.
+    `position` = (topic, partition, offset) of the Kafka message. Kafka delivers at least once
+    (after a crash the last uncommitted batch is read again), so the offset of the last applied
+    message is stored in the same transaction as the state change and anything at or below it
+    is skipped: the Redis state ends up as if every message was applied exactly once.
+
+    A user's events must arrive in time order (Kafka keeps that per key); an older event is
+    skipped as "late" because the decayed sums can only move forward in time.
     """
     u, item = ev.visitor_id, ev.item_id
-    raw = r.hgetall(state_key(u))
-    state = _decode_state(raw) if raw else None
+    field = f"{position[0]}:{position[1]}" if position else None
+    pipe = r.pipeline(transaction=False)
+    pipe.hgetall(state_key(u))
+    if field:
+        pipe.hget(OFFSETS, field)
+    read = pipe.execute()
+    if field and read[1] is not None and position[2] <= int(read[1]):
+        return "duplicate"
+    state = _decode_state(read[0]) if read[0] else None
     ts = from_ms(ev.ts)
     if state is not None and ts < state["last_ts"]:
-        return False
+        return "late"
     state = update_user_state(state, ts, item, ev.event)
 
     pipe = r.pipeline(transaction=True)
@@ -117,8 +132,10 @@ def handle_event(r, ev: Event, item_cat: Mapping[int, int]) -> bool:
     category = item_cat.get(item)
     if category is not None:  # items missing from the frozen table have no category
         pipe.hincrby(cats_key(u), str(category), 1)
+    if field:
+        pipe.hset(OFFSETS, field, position[2])
     pipe.execute()
-    return True
+    return "ok"
 
 
 def advance_clock(r, ts_ms: int) -> None:

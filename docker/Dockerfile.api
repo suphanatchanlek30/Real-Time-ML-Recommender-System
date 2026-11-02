@@ -1,0 +1,21 @@
+FROM python:3.11-slim
+
+# LightGBM needs the OpenMP runtime, which the slim image does not ship
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements-serve.txt .
+RUN pip install --no-cache-dir -r requirements-serve.txt
+
+# only the code serving needs; the model and the feature tables are mounted, not baked in
+COPY src/__init__.py src/config.py ./src/
+COPY src/features/__init__.py src/features/spec.py src/features/user.py ./src/features/
+COPY src/serving ./src/serving
+COPY src/streaming ./src/streaming
+COPY src/etl/__init__.py src/etl/config.py ./src/etl/
+
+ENV MODEL_DIR=/models/champion FEATURES_DIR=/data/features FEATURES_SNAPSHOT=val \
+    REDIS_URL=redis://redis:6379/0 PYTHONUNBUFFERED=1
+EXPOSE 8000
+CMD ["uvicorn", "src.serving.app:app_factory", "--factory", "--host", "0.0.0.0", "--port", "8000"]

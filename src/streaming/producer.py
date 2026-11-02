@@ -1,10 +1,12 @@
 """Replay recorded events into Kafka to imitate live traffic.
 
-    python -m src.streaming.producer [--rate 2000] [--limit N] [--reset-topic]
+    python -m src.streaming.producer [--rate 2000] [--limit N] [--reset-topic | --reset-only]
 
 Events from the snapshot time onwards (default: the time the batch state in Redis stops at) are
 sent in time order, keyed by visitor_id, as JSON {visitor_id, item_id, event, ts}.
-`--reset-topic` deletes and recreates the topic so a second replay does not mix with the first.
+`--reset-topic` deletes and recreates the topic first; `--reset-only` does just that and sends
+nothing. A consumer that was running when the topic was deleted holds stale partition state, so
+`make replay` stops the consumer, resets the topic and starts the consumer again.
 """
 
 import argparse
@@ -51,15 +53,19 @@ def reset_topic(admin) -> None:
     ].result()
 
 
-def main(rate: float = 0, limit: int | None = None, reset: bool = False) -> dict:
+def main(
+    rate: float = 0, limit: int | None = None, reset: bool = False, reset_only: bool = False
+) -> dict:
     from confluent_kafka import Producer
     from confluent_kafka.admin import AdminClient
 
     settings = Settings()
     start = snapshot_start(settings)
-    events = load_events(start, limit)
-    if reset:
+    if reset or reset_only:
         reset_topic(AdminClient({"bootstrap.servers": K.BOOTSTRAP}))
+    if reset_only:
+        return {"topic": K.TOPIC, "reset": True, "sent": 0}
+    events = load_events(start, limit)
 
     producer = Producer(
         {"bootstrap.servers": K.BOOTSTRAP, "linger.ms": 20, "compression.type": "lz4"}
@@ -97,6 +103,8 @@ if __name__ == "__main__":
         "--rate", type=float, default=0, help="events per second (0 = as fast as possible)"
     )
     parser.add_argument("--limit", type=int, default=None, help="stop after this many events")
-    parser.add_argument("--reset-topic", action="store_true")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--reset-topic", action="store_true", help="recreate the topic, then send")
+    group.add_argument("--reset-only", action="store_true", help="recreate the topic, send nothing")
     args = parser.parse_args()
-    print(json.dumps(main(args.rate, args.limit, args.reset_topic), indent=2))
+    print(json.dumps(main(args.rate, args.limit, args.reset_topic, args.reset_only), indent=2))
