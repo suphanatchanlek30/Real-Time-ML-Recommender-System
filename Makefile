@@ -1,4 +1,4 @@
-.PHONY: install lint format test
+.PHONY: install lint format test etl
 
 install:
 	pip install -r requirements-dev.txt
@@ -11,3 +11,6 @@ format:
 
 test:
 	pytest
+
+etl:
+	python -m src.etl.run
