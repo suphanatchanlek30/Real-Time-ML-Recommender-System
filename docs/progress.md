@@ -9,7 +9,7 @@
 | ✅ | 2. EDA | `55e89e3`, `96ce9ac` |
 | ✅ | 3. ETL และแบ่งข้อมูลตามเวลา | `4de5fa3` |
 | ✅ | 4. Evaluation และ baseline | `3386a8a` |
-| ✅ | 5. Feature engineering | (commit ถัดไป) |
+| ✅ | 5. Feature engineering | `b0f1e42` |
 | ⬜ | 6. ALS + Ranker | - |
 | ⬜ | 7. Serving, Streaming, Docker | - |
 | ⬜ | 8. Load test และ Monitoring | - |
@@ -128,12 +128,12 @@
 | `val` | val_start | ช่วง Val | เลือกโมเดล |
 | `test` | test_start (history = Train + Val) | ช่วง Test | รายงานผลสุดท้าย |
 
-**ฟีเจอร์ 34 ตัว** (นิยามทั้งหมดใน [schema.py](../src/features/schema.py) ที่เดียว ใช้สร้าง Pandera schema และ `schema.json` อัตโนมัติ):
+**ฟีเจอร์ 35 ตัว** (นิยามทั้งหมดใน [schema.py](../src/features/schema.py) ที่เดียว ใช้สร้าง Pandera schema และ `schema.json` อัตโนมัติ):
 
 | กลุ่ม | ตัวอย่าง | หมายเหตุ |
 | --- | --- | --- |
 | user (11) | จำนวน view/cart/buy, sessions, recency, decayed interest | เก็บเป็น *state* ที่อัปเดตทีละ event ได้ แล้วค่อย `derive` ตอนใช้งาน |
-| item (15) | popularity 1/7/28 วัน, trend, unique users, อายุ, conversion แบบ smoothed, category, available | batch อย่างเดียว |
+| item (16) | popularity 1/7/28 วัน, trend, unique users, อายุ, conversion แบบ smoothed, category, available | batch อย่างเดียว |
 | category (3) | popularity ของหมวด, จำนวนสินค้า | รวมจาก item features |
 | pair (5) | user เคย view/cart/buy สินค้านี้กี่ครั้ง, ห่างกี่วัน, สัดส่วนหมวดที่ผู้ใช้สนใจ | คำนวณตอนให้คะแนน candidate |
 
