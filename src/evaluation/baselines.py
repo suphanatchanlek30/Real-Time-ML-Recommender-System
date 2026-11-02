@@ -5,8 +5,7 @@ from datetime import timedelta
 import numpy as np
 import polars as pl
 
-# Interest weight per event type (same starting point planned for ALS, tuned later)
-EVENT_WEIGHTS = {"view": 1, "addtocart": 3, "transaction": 5}
+from src.config import EVENT_WEIGHTS
 
 
 def fit_popularity(

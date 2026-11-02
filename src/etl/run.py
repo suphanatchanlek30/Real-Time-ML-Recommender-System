@@ -3,7 +3,8 @@
     python -m src.etl.run            (or: make etl)
 
 Outputs in <DATA_DIR>/processed: events.parquet, train.parquet, val.parquet,
-test.parquet and etl_report.json (counts, thresholds, split dates, file hash).
+test.parquet, item_properties.parquet and etl_report.json (counts, thresholds, split dates,
+file hash).
 """
 
 import hashlib
@@ -13,7 +14,7 @@ from pathlib import Path
 
 import polars as pl
 
-from src.etl import clean
+from src.etl import clean, item_properties
 from src.etl.config import PROCESSED_DIR, RAW_DIR, BotFilter, SplitConfig
 from src.etl.schema import CleanEvents, RawEvents
 from src.etl.split import split_boundaries, split_by_time
@@ -81,6 +82,7 @@ def run(raw_dir: Path = RAW_DIR, out_dir: Path = PROCESSED_DIR) -> dict:
         },
         "events_parquet_sha256": sha256(out_dir / "events.parquet"),
     }
+    report.update(item_properties.run(raw_dir, out_dir))
     (out_dir / "etl_report.json").write_text(json.dumps(report, indent=2))
     return report
 

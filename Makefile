@@ -1,4 +1,4 @@
-.PHONY: install lint format test etl eval-baseline
+.PHONY: install lint format test etl eval-baseline features
 
 install:
 	pip install -r requirements-dev.txt
@@ -17,3 +17,6 @@ etl:
 
 eval-baseline:
 	python -m src.evaluation.run_baseline
+
+features:
+	python -m src.features.build

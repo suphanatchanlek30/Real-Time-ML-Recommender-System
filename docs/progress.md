@@ -9,7 +9,7 @@
 | ✅ | 2. EDA | `55e89e3`, `96ce9ac` |
 | ✅ | 3. ETL และแบ่งข้อมูลตามเวลา | `4de5fa3` |
 | ✅ | 4. Evaluation และ baseline | `3386a8a` |
-| ⬜ | 5. Feature engineering | - |
+| ✅ | 5. Feature engineering | (commit ถัดไป) |
 | ⬜ | 6. ALS + Ranker | - |
 | ⬜ | 7. Serving, Streaming, Docker | - |
 | ⬜ | 8. Load test และ Monitoring | - |
@@ -115,7 +115,41 @@
 
 **ข้อจำกัดที่รู้อยู่:** baseline ไม่ตัดสินค้าที่ผู้ใช้เคยทำไปแล้วออกจากรายการ และ ground truth มีแค่ ~1.9K ผู้ใช้ ผลจึงแกว่งง่าย
 
+## 5. Feature engineering
+โค้ด: [src/features/](../src/features/) รันด้วย `make features` (ต้อง `make etl` ก่อน) ผลอยู่ใน `data/features/`
+
+**หลักการเดียว: point-in-time** ทุกฟังก์ชันรับ `as_of` และใช้เฉพาะ event ที่ `ts < as_of` ฟีเจอร์จึงไม่มีทางเห็นช่วงที่เรากำลังทำนาย (กัน leakage) มี test ที่ยืนยันว่าเติม event อนาคตเข้าไปแล้วผลไม่เปลี่ยน (ลองแก้โค้ดให้รั่วแล้ว test ล้มจริง)
+
+**Snapshot** (สร้างตารางฟีเจอร์ 3 ชุด ขอบเขตดึงจาก `split_boundaries` ตัวเดียวกับ ETL):
+
+| Snapshot | as_of | labels | ใช้ทำ |
+| --- | --- | --- | --- |
+| `rank_train` | val_start - 7 วัน | 7 วันสุดท้ายของ Train | เทรน Ranker (ฟีเจอร์จากอดีต, label จาก "อนาคต") |
+| `val` | val_start | ช่วง Val | เลือกโมเดล |
+| `test` | test_start (history = Train + Val) | ช่วง Test | รายงานผลสุดท้าย |
+
+**ฟีเจอร์ 34 ตัว** (นิยามทั้งหมดใน [schema.py](../src/features/schema.py) ที่เดียว ใช้สร้าง Pandera schema และ `schema.json` อัตโนมัติ):
+
+| กลุ่ม | ตัวอย่าง | หมายเหตุ |
+| --- | --- | --- |
+| user (11) | จำนวน view/cart/buy, sessions, recency, decayed interest | เก็บเป็น *state* ที่อัปเดตทีละ event ได้ แล้วค่อย `derive` ตอนใช้งาน |
+| item (15) | popularity 1/7/28 วัน, trend, unique users, อายุ, conversion แบบ smoothed, category, available | batch อย่างเดียว |
+| category (3) | popularity ของหมวด, จำนวนสินค้า | รวมจาก item features |
+| pair (5) | user เคย view/cart/buy สินค้านี้กี่ครั้ง, ห่างกี่วัน, สัดส่วนหมวดที่ผู้ใช้สนใจ | คำนวณตอนให้คะแนน candidate |
+
+**ตัดสินใจสำคัญ:**
+- **offline = online:** user features แยกเป็น state (counts, เวลาแรก/ล่าสุด, decayed sums, 20 item ล่าสุด) กับ `derive` (recency, ratio) ไม่เก็บค่าอย่าง "days since last" เพราะเก่าทันทีที่เขียน `update_user_state` (ทีละ event สำหรับ consumer) ให้ผลเท่ากับ batch ตาม test
+- **Decayed counts** (`exp(-อายุ/7 วัน)`) แทนหน้าต่างคงที่ เพราะอัปเดตทีละ event ได้
+- **Conversion แบบ smoothed:** 66% ของสินค้ามี event ไม่เกิน 5 ครั้ง อัตรา raw จะหลอก จึงดึงเข้าหาค่าเฉลี่ยรวม
+- **category / available แบบ as-of:** ดึงจากไฟล์ item_properties ครั้งเดียวใน ETL (4.2 MB) แล้วใช้ค่าล่าสุดก่อน `as_of` ไม่ใช้ "ค่าล่าสุดทั้งไฟล์" ที่รั่วอนาคต
+- ใช้ `EVENT_WEIGHTS` จาก [src/config.py](../src/config.py) ที่เดียว ร่วมกับ baseline
+
+**ข้อจำกัดที่รู้อยู่:**
+- ผู้ใช้ cold ไม่มีแถว user features (ค่าเป็น null ให้ LightGBM จัดการ) และ ~21% ของสินค้าไม่รู้หมวด ณ เวลานั้น (ใช้ -1)
+- **Session features วัดผลไม่ได้ในโปรโตคอลนี้:** เราทำนาย 7 วันข้างหน้าจาก snapshot ต้นช่วง "session ปัจจุบัน" จึงเก่าหรือว่าง ฟีเจอร์ `recent_items` และ state ทำไว้เพื่อให้ตรงกับ Redis แต่ไม่ควรคาดหวังว่าจะเห็นผลบน Val
+- Pair features ช่วยได้เฉพาะถ้า candidate set ไม่ตัดสินค้าที่ผู้ใช้เคยดูออก (ต้องระวังตอนทำ ALS + Ranker)
+
 ---
 
 ## ขั้นต่อไป
-**5. Feature engineering:** สร้างฟีเจอร์ user / item / session / category จาก Train เท่านั้น (กัน leakage) และเขียน `schema.json`
+**6. ALS + Ranker:** เทรน ALS ดึง candidate 200 ตัว แล้วเทรน LightGBM LambdaRank บน snapshot `rank_train` ต้องชนะ baseline (NDCG@10 > 0.0102, Recall@200 > 0.1032) พร้อม log ลง MLflow

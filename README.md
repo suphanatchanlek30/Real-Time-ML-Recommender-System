@@ -83,7 +83,7 @@
 - [x] EDA
 - [x] ETL และแบ่งข้อมูลตามเวลา
 - [x] Evaluation และ baseline
-- [ ] Feature engineering
+- [x] Feature engineering
 - [ ] ALS + Ranker
 - [ ] Serving, Streaming, Docker
 - [ ] Load test และ Monitoring
