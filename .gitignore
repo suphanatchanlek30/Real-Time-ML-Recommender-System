@@ -25,3 +25,7 @@ artifacts/
 # Env / OS
 .env
 .DS_Store
+
+# load test
+loadtest/users.json
+results/

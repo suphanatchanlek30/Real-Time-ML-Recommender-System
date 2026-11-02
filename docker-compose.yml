@@ -135,6 +135,23 @@ services:
     depends_on:
       - prometheus
 
+  k6:
+    image: ${K6_IMAGE}
+    profiles: ["loadtest"]
+    # run with:  make loadtest   (docker compose run --rm k6 run /loadtest/k6.js)
+    environment:
+      BASE_URL: http://api:8000
+      SCENARIO: ${K6_SCENARIO}
+      # send k6's own metrics to Prometheus so Grafana shows them next to the server-side ones
+      K6_PROMETHEUS_RW_SERVER_URL: http://prometheus:9090/api/v1/write
+      K6_PROMETHEUS_RW_TREND_STATS: avg,p(95),p(99)
+    volumes:
+      - ./loadtest:/loadtest:ro
+      - ./results:/results
+    depends_on:
+      - api
+      - prometheus
+
 volumes:
   prometheus-data:
   grafana-data:

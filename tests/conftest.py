@@ -11,6 +11,8 @@ NEEDS = {
     "test_streaming.py": ["fakeredis", "redis", "pydantic", "lightgbm"],
     "test_api.py": ["fakeredis", "redis", "fastapi", "httpx", "lightgbm", "prometheus_client"],
     "test_parity_real.py": ["fakeredis", "lightgbm", "scipy"],
+    "test_training.py": ["lightgbm", "scipy"],
+    "test_loadtest_report.py": ["matplotlib"],
     "test_smoke_stack.py": ["redis", "httpx", "confluent_kafka"],
 }
 
