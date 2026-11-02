@@ -2,6 +2,35 @@
 
 > Two-stage recommendation pipeline: from raw events to a low-latency serving API
 
+<p align="center">
+  <img src="https://img.shields.io/badge/TRACK-ML%20ENGINEERING%20%26%20MLOPS-7c3aed?style=for-the-badge&labelColor=555555" alt="TRACK ML ENGINEERING & MLOPS">
+  <img src="https://img.shields.io/badge/STATUS-PROTOTYPE-6b7280?style=for-the-badge&labelColor=555555" alt="STATUS PROTOTYPE">
+  <img src="https://img.shields.io/badge/DATA-RETAILROCKET%20%7C%202.7M%20EVENTS-e8a33d?style=for-the-badge&labelColor=555555" alt="DATA RETAILROCKET | 2.7M EVENTS">
+  <br>
+  <img src="https://img.shields.io/badge/LANGUAGE-PYTHON%203.11-3776ab?style=for-the-badge&labelColor=555555&logo=python&logoColor=white" alt="LANGUAGE PYTHON 3.11">
+  <img src="https://img.shields.io/badge/DATA-POLARS%20%7C%20PARQUET%20%7C%20PANDERA-2563eb?style=for-the-badge&labelColor=555555&logo=polars&logoColor=white" alt="DATA POLARS | PARQUET | PANDERA">
+  <img src="https://img.shields.io/badge/TRACKING-MLFLOW-0194e2?style=for-the-badge&labelColor=555555&logo=mlflow&logoColor=white" alt="TRACKING MLFLOW">
+  <br>
+  <img src="https://img.shields.io/badge/MODEL-ALS%20%7C%20LIGHTGBM%20LAMBDARANK-16a34a?style=for-the-badge&labelColor=555555" alt="MODEL ALS | LIGHTGBM LAMBDARANK">
+  <img src="https://img.shields.io/badge/STREAMING-KAFKA%20%28KRAFT%29-231f20?style=for-the-badge&labelColor=555555&logo=apachekafka&logoColor=white" alt="STREAMING KAFKA (KRAFT)">
+  <img src="https://img.shields.io/badge/FEATURE%20STORE-REDIS-dc382d?style=for-the-badge&labelColor=555555&logo=redis&logoColor=white" alt="FEATURE STORE REDIS">
+  <br>
+  <img src="https://img.shields.io/badge/API-FASTAPI%20%7C%20UVICORN-009688?style=for-the-badge&labelColor=555555&logo=fastapi&logoColor=white" alt="API FASTAPI | UVICORN">
+  <img src="https://img.shields.io/badge/INFRA-DOCKER%20COMPOSE-2496ed?style=for-the-badge&labelColor=555555&logo=docker&logoColor=white" alt="INFRA DOCKER COMPOSE">
+  <img src="https://img.shields.io/badge/MONITORING-PROMETHEUS%20%7C%20GRAFANA-e6522c?style=for-the-badge&labelColor=555555&logo=prometheus&logoColor=white" alt="MONITORING PROMETHEUS | GRAFANA">
+  <br>
+  <img src="https://img.shields.io/badge/LOAD%20TEST-K6-7d64ff?style=for-the-badge&labelColor=555555&logo=k6&logoColor=white" alt="LOAD TEST K6">
+  <img src="https://img.shields.io/badge/CI%20%26%20QUALITY-GITHUB%20ACTIONS%20%7C%20PYTEST%20%7C%20RUFF-2088ff?style=for-the-badge&labelColor=555555&logo=githubactions&logoColor=white" alt="CI & QUALITY GITHUB ACTIONS | PYTEST | RUFF">
+  <br>
+  <img src="https://img.shields.io/badge/MODEL%20NDCG%4010-0.033%20%28BASELINE%200.010%29-22c55e?style=for-the-badge&labelColor=555555" alt="MODEL NDCG@10 0.033 (BASELINE 0.010)">
+  <img src="https://img.shields.io/badge/P95%20LATENCY-30%20MS%20%40%20100%20VUS-22c55e?style=for-the-badge&labelColor=555555" alt="P95 LATENCY 30 MS @ 100 VUS">
+  <img src="https://img.shields.io/badge/THROUGHPUT-695%20REQ%2FS-22c55e?style=for-the-badge&labelColor=555555" alt="THROUGHPUT 695 REQ/S">
+  <br>
+  <img src="https://img.shields.io/badge/CAPACITY-~1%2C360%20REQ%2FS%20AT%20P95%20%3C%20100%20MS-22c55e?style=for-the-badge&labelColor=555555" alt="CAPACITY ~1,360 REQ/S AT P95 < 100 MS">
+  <img src="https://img.shields.io/badge/ERROR%20RATE-0%25-22c55e?style=for-the-badge&labelColor=555555" alt="ERROR RATE 0%">
+  <img src="https://img.shields.io/badge/TESTS-89%20PASSED-22c55e?style=for-the-badge&labelColor=555555" alt="TESTS 89 PASSED">
+</p>
+
 ระบบแนะนำสินค้าแบบครบวงจร (end-to-end) สำหรับร้านค้าออนไลน์ ตั้งแต่จัดการข้อมูล ออกแบบฟีเจอร์ เทรนโมเดล ไปจนถึง API ที่แนะนำสินค้าให้ผู้ใช้แต่ละคนแบบเรียลไทม์ โดยฟีเจอร์ถูกอัปเดตสดจาก Kafka ไปยัง Redis และมี Prometheus/Grafana กับ k6 วัดผลจริง ออกแบบให้เหมือนงานของ ML Engineer ไม่ใช่แค่ notebook
 
 | | ผลที่ได้ |
