@@ -1,4 +1,4 @@
-.PHONY: install install-train lint format test etl eval-baseline features tune-als train mlflow-ui pull-model load-redis up down replay logs smoke install-all env loadtest loadtest-smoke loadtest-stress loadtest-users
+.PHONY: install install-train lint format test etl eval-baseline features tune-als train mlflow-ui pull-model load-redis up down replay logs smoke install-all env loadtest loadtest-smoke loadtest-stress loadtest-users api-test
 
 install:
 	pip install -r requirements-dev.txt
@@ -81,3 +81,7 @@ loadtest:
 
 loadtest-stress:
 	K6_SCENARIO=stress docker compose --profile loadtest run --rm k6 run --quiet --out experimental-prometheus-rw /loadtest/k6.js
+
+# run the Postman collection from the terminal (Newman in Docker, nothing to install); needs the stack up
+api-test:
+	docker run --rm -v "$(PWD)/postman":/etc/newman postman/newman run recsys.postman_collection.json -e local.postman_environment.json --env-var base_url=http://host.docker.internal:$${API_PORT:-8000}
