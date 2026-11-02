@@ -88,13 +88,13 @@
 - [x] Serving, Streaming, Docker
 - [ ] Load test และ Monitoring
 
-รายละเอียดแต่ละขั้นอยู่ใน [docs/progress.md](docs/progress.md) วิธีรันเทรนอยู่ใน [docs/runbook-training.md](docs/runbook-training.md) และวิธีรันระบบออนไลน์อยู่ใน [docs/runbook-serving.md](docs/runbook-serving.md)
+รายละเอียดแต่ละขั้นอยู่ใน [docs/progress.md](docs/progress.md) วิธีรันเทรนอยู่ใน [docs/runbook-training.md](docs/runbook-training.md) และวิธีรันระบบออนไลน์อยู่ใน [docs/runbook-serving.md](docs/runbook-serving.md) ค่าตั้งค่าทั้งหมดอยู่ใน `.env` (คัดลอกจาก `.env.example`)
 
 ## โครงสร้างโปรเจกต์
 
 ```text
 src/             # etl, features, training, evaluation, serving, streaming
-docker/          # Dockerfile ของ API และ consumer (docker-compose.yml อยู่ที่ root)
+docker/          # Dockerfile ของ API และ consumer (docker-compose.yml และ .env.example อยู่ที่ root)
 tests/           # pytest
 notebooks/       # EDA
 docs/            # progress log และภาพออกแบบระบบ (docs/diagrams)

@@ -208,7 +208,8 @@
 4. **กัน skew ของ pair features:** แผนเดิมเก็บแค่ 20 สินค้าล่าสุด แต่ตอนเทรนนับจากประวัติทั้งหมด จึงเก็บ hash จำนวน view/cart/buy ต่อสินค้า (`user:{id}:items`) และจำนวนต่อหมวด (`user:{id}:cats`) เพิ่ม (`user:{id}:recent` ยังเก็บไว้ตามข้อตกลง)
 5. **ฟีเจอร์ผู้ใช้ใช้โค้ดชุดเดียวกับ offline** (`derive_user_features`) ส่วนฟีเจอร์สินค้าโหลดเป็น numpy ตอน startup เพื่อให้ request ละไม่กี่ ms
 6. **Redis ช้า/ล่ม:** timeout 50 ms แล้วตอบด้วย Ranker โดยไม่มีฟีเจอร์ผู้ใช้ (`degraded: true`); Ranker พัง → ตอบ popular list (`source: popular_fallback`)
-7. **Reload ปลอดภัย:** สร้างโมเดลใหม่ให้เสร็จและตรวจก่อน (ลำดับฟีเจอร์ต้องตรง `spec.py`, snapshot ต้องตรง) ถ้าไม่ผ่านตอบ 409 และใช้โมเดลเดิมต่อ ทดสอบกับ stack จริงแล้ว
+7. **ตั้งค่าด้วย `.env`:** พอร์ต, image, topic, timeout, snapshot, token ฯลฯ อยู่ใน `.env` ที่เดียว (`.env.example` เป็นแม่แบบที่ commit, `.env` ไม่ถูก commit) Dockerfile ไม่มีค่าตั้งค่าอยู่เลย compose ส่งค่าเข้า container ผ่าน `${...}` และโค้ดบนเครื่องอ่าน `.env` เอง (`src/env.py`) ทดสอบจริงโดยเปลี่ยนทุกค่าจากค่าเริ่มต้น (พอร์ต 8001/6380/9095, topic, partition, อัตรา replay, token) แล้วทั้งระบบยังทำงานและผลถูกต้อง มี test กันไม่ให้ compose อ้างตัวแปรที่ไม่อยู่ใน `.env.example`
+8. **Reload ปลอดภัย:** สร้างโมเดลใหม่ให้เสร็จและตรวจก่อน (ลำดับฟีเจอร์ต้องตรง `spec.py`, snapshot ต้องตรง) ถ้าไม่ผ่านตอบ 409 และใช้โมเดลเดิมต่อ ทดสอบกับ stack จริงแล้ว
 
 **ผลที่วัดได้** (MacBook, Docker Desktop):
 

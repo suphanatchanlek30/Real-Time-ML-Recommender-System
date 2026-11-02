@@ -1,4 +1,4 @@
-.PHONY: install install-train lint format test etl eval-baseline features tune-als train mlflow-ui pull-model load-redis up down replay logs smoke install-all
+.PHONY: install install-train lint format test etl eval-baseline features tune-als train mlflow-ui pull-model load-redis up down replay logs smoke install-all env
 
 install:
 	pip install -r requirements-dev.txt
@@ -39,23 +39,27 @@ mlflow-ui:
 pull-model:
 	python -m src.serving.pull_model
 
-up:
+# create .env from the template once; edit .env to change ports, images, topic, token, ...
+env:
+	@test -f .env && echo ".env already exists" || (cp .env.example .env && echo "created .env from .env.example")
+
+up: env
 	docker compose up -d --build
 
 down:
 	docker compose down
 
 load-redis:
-	REDIS_URL=redis://localhost:6379/0 python -m src.serving.load_redis
+	python -m src.serving.load_redis
 
 # start from a clean state, then replay the events through Kafka:
 #   stop the consumer, reset Redis to the batch state, recreate the topic, restart the consumer
 replay:
 	docker compose stop consumer
 	$(MAKE) load-redis
-	docker compose run --rm producer python -m src.streaming.producer --reset-only
+	docker compose run --rm --build producer python -m src.streaming.producer --reset-only
 	docker compose up -d consumer
-	docker compose run --rm producer
+	docker compose run --rm --build producer
 
 logs:
 	docker compose logs -f api consumer

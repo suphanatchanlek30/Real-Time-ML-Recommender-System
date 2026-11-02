@@ -12,6 +12,28 @@ make install-all                 # เพิ่ม fastapi, redis, kafka client,
 
 เปิด **Docker Desktop** ให้เรียบร้อยก่อน (เช็กด้วย `docker info` ต้องไม่ error)
 
+## ตั้งค่าด้วย `.env`
+
+ค่าตั้งค่าทั้งหมด (พอร์ต, image, ชื่อ topic, timeout ของ Redis, snapshot, token ของ `/admin/reload`, อัตรา replay) อยู่ในไฟล์ `.env` ที่เดียว ไม่ได้เขียนไว้ใน Dockerfile หรือโค้ด
+
+```bash
+make env                         # สร้าง .env จาก .env.example (ถ้ายังไม่มี) ทำให้อัตโนมัติตอน make up
+```
+
+แก้ค่าใน `.env` แล้วรัน `make up` ใหม่ได้เลย ไม่ต้อง rebuild image (ยกเว้นเปลี่ยนโค้ด) ไฟล์ `.env` ไม่ถูก commit (เก็บ token ได้) ส่วน `.env.example` เป็นแม่แบบที่ commit ไว้
+
+| กลุ่ม | ตัวแปร | ใช้ทำอะไร |
+| --- | --- | --- |
+| พอร์ตบนเครื่อง | `API_PORT`, `REDIS_PORT`, `KAFKA_EXTERNAL_PORT` | เปลี่ยนเมื่อพอร์ตชนกับโปรแกรมอื่น |
+| Image | `KAFKA_IMAGE`, `REDIS_IMAGE` | เลือกเวอร์ชัน |
+| Redis | `REDIS_HOST`, `REDIS_DB`, `REDIS_TIMEOUT_S` | ที่อยู่และ timeout (ช้ากว่านี้ API ตอบแบบไม่มีฟีเจอร์ผู้ใช้) |
+| Kafka | `KAFKA_TOPIC`, `KAFKA_GROUP`, `KAFKA_PARTITIONS`, `KAFKA_REPLAY_RATE` | topic, consumer group, จำนวน partition, events ต่อวินาทีตอน replay |
+| โมเดล/ฟีเจอร์ | `MODEL_DIR`, `FEATURES_DIR`, `FEATURES_SNAPSHOT`, `DATA_DIR` | path บนเครื่อง และ snapshot ที่ API ใช้ |
+| API | `ADMIN_TOKEN` | ถ้าตั้งค่า `POST /admin/reload` ต้องส่งหัว `X-Admin-Token` |
+| MLflow | `MLFLOW_TRACKING_URI` | ที่เก็บผลเทรน (ค่าเริ่มต้นเป็นไฟล์ SQLite) |
+
+โค้ด Python บนเครื่อง (เช่น `make load-redis`, `make smoke`) อ่าน `.env` เอง ส่วนใน container ค่าเหล่านี้ถูกส่งต่อโดย `docker-compose.yml` ผ่าน `${ชื่อตัวแปร}` สิ่งที่ยังอยู่ใน compose คือการเชื่อมต่อภายใน container ที่เปลี่ยนไม่ได้ (ชื่อ host `redis`/`kafka` และจุด mount ของโมเดลกับฟีเจอร์) ตัวแปรที่ตั้งไว้ใน shell จะชนะค่าใน `.env`
+
 ## 1. ดึงโมเดลที่ champion
 
 ```bash
@@ -22,7 +44,7 @@ make pull-model                  # -> models/champion/ (als.npz, ranker.txt, sch
 
 ```bash
 make up                          # build image และเปิด kafka, redis, api, consumer (ครั้งแรก ~2 นาที)
-curl localhost:8000/health       # {"status":"ok", "model_version":"1", ...}
+curl localhost:8000/health       # {"status":"ok", "model_version":"1", ...} (พอร์ตตาม API_PORT ใน .env)
 ```
 
 ## 3. โหลดข้อมูลตั้งต้นและ replay event
@@ -88,6 +110,7 @@ make down
 | อาการ | วิธีแก้ |
 | --- | --- |
 | `Cannot connect to the Docker daemon` | เปิด Docker Desktop แล้วรอจนไอคอนนิ่ง |
+| `variable is not set. Defaulting to a blank string` | ไม่มี `.env` หรือขาดตัวแปร: รัน `make env` และเทียบกับ `.env.example` |
 | `/health` ตอบ `no_model` | ยังไม่ได้ `make pull-model` หรือ `models/champion/` ไม่ครบ ดู `docker compose logs api` |
 | `reload failed ... snapshot` | โมเดลกับ `data/features/` ไม่ใช่ชุดเดียวกัน รัน `make features` และ `make pull-model` ใหม่ |
 | `/health` ตอบ `degraded` | Redis ไม่พร้อม: `docker compose ps` แล้วลอง `docker compose restart redis` จากนั้น `make load-redis` |

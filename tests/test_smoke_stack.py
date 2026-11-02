@@ -18,9 +18,14 @@ pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_STACK_TESTS") != "1", reason="set RUN_STACK_TESTS=1 with the stack running"
 )
 
-API = os.environ.get("API_URL", "http://localhost:8000")
-REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "localhost:9094")
+from src.serving.config import Settings  # noqa: E402  (also loads .env)
+from src.streaming.config import TOPIC  # noqa: E402
+
+API = os.environ.get("API_URL", f"http://localhost:{os.environ.get('API_PORT', '8000')}")
+REDIS_URL = Settings().redis_url
+BOOTSTRAP = os.environ.get(
+    "KAFKA_BOOTSTRAP", f"localhost:{os.environ.get('KAFKA_EXTERNAL_PORT', '9094')}"
+)
 
 
 def test_health_reports_a_model_and_a_reachable_redis():
@@ -49,7 +54,7 @@ def test_event_sent_to_kafka_reaches_redis_and_the_api_sees_it():
     ts = int(r.get("clock") or 1) + 1000  # event time after the newest event seen so far
     producer = Producer({"bootstrap.servers": BOOTSTRAP})
     message = {"visitor_id": visitor, "item_id": 5, "event": "view", "ts": ts}
-    producer.produce("user-events", key=str(visitor), value=json.dumps(message))
+    producer.produce(TOPIC, key=str(visitor), value=json.dumps(message))
     producer.flush(10)
 
     deadline = time.time() + 20
