@@ -1,6 +1,6 @@
 # Online half of the system: Kafka -> consumer -> Redis -> API.
 #   make env       create .env from .env.example (once), then edit .env
-#   make up        start kafka, redis, api, consumer
+#   make up        start kafka, redis, api, consumer, prometheus, grafana
 #   make replay    reset Redis and the topic, then replay events (producer has profile `demo`)
 #
 # Every value you may want to change (ports, images, topic, timeouts, snapshot, token) comes from
@@ -103,3 +103,38 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+
+  prometheus:
+    image: ${PROMETHEUS_IMAGE}
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-remote-write-receiver   # k6 sends its client-side metrics here
+    ports:
+      - "${PROMETHEUS_PORT}:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - api
+      - consumer
+
+  grafana:
+    image: ${GRAFANA_IMAGE}
+    ports:
+      - "${GRAFANA_PORT}:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"      # local use: dashboards can be viewed without logging in
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/recsys.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus-data:
+  grafana-data:
