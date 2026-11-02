@@ -76,10 +76,27 @@
 
 ![End-to-end](docs/diagrams/3-end-to-end.drawio.svg)
 
+## Progress
+
+- [x] ออกแบบระบบ
+- [x] Setup repo
+- [x] EDA
+- [x] ETL และแบ่งข้อมูลตามเวลา
+- [ ] Evaluation และ baseline
+- [ ] Feature engineering
+- [ ] ALS + Ranker
+- [ ] Serving, Streaming, Docker
+- [ ] Load test และ Monitoring
+
+รายละเอียดแต่ละขั้นอยู่ใน [docs/progress.md](docs/progress.md)
+
 ## โครงสร้างโปรเจกต์
 
 ```text
-docs/diagrams/   # ภาพออกแบบระบบ (draw.io SVG)
+src/             # etl, features, training, evaluation, serving, streaming
+tests/           # pytest
+notebooks/       # EDA
+docs/            # progress log และภาพออกแบบระบบ (docs/diagrams)
 ```
 
 ---
