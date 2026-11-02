@@ -12,7 +12,7 @@
 | ✅ | 5. Feature engineering | `b0f1e42` |
 | ✅ | 6. ALS + Ranker | `c819ad9` |
 | ✅ | 7. Serving, Streaming, Docker | `fa8ffa9`, `b306328`, `9da1f4b`, `c5b1c8b` |
-| ✅ | 8. Load test และ Monitoring | `fc8667e`, `97fdfb4`, `a02f14d`, `37271b4` |
+| ✅ | 8. Load test และ Monitoring | `fc8667e`, `97fdfb4`, `a02f14d`, `37271b4`, `f0f4a9b` |
 
 ---
 
