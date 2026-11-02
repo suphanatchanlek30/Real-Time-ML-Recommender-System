@@ -8,7 +8,7 @@
 | ✅ | 1. Setup repo | `d0d17f7` |
 | ✅ | 2. EDA | `55e89e3`, `96ce9ac` |
 | ✅ | 3. ETL และแบ่งข้อมูลตามเวลา | `4de5fa3` |
-| ⬜ | 4. Evaluation และ baseline | - |
+| ✅ | 4. Evaluation และ baseline | `61af077` |
 | ⬜ | 5. Feature engineering | - |
 | ⬜ | 6. ALS + Ranker | - |
 | ⬜ | 7. Serving, Streaming, Docker | - |
@@ -72,7 +72,50 @@
 
 **ข้อจำกัดที่รู้อยู่:** การตัดบอทใช้จำนวน event ทั้งก้อน จึงใช้ข้อมูลอนาคตเล็กน้อย (ยอมรับได้เพราะเป็นแค่การคัดผู้ใช้ผิดปกติ ไม่ใช่การสร้างฟีเจอร์)
 
+## 4. Evaluation และ baseline
+โค้ด: [src/evaluation/](../src/evaluation/) รันด้วย `make eval-baseline` ผลอยู่ใน [reports/baseline_val.md](../reports/baseline_val.md)
+
+**โจทย์ที่วัด:** ให้ผู้ใช้แต่ละคนได้รายการแนะนำ Top-K แล้วดูว่าตรงกับสินค้าที่เขาใส่ตะกร้า/ซื้อจริงในช่วง Val กี่ชิ้น (ground truth) ผู้ใช้ที่ไม่มี addtocart/transaction ในช่วงนั้นไม่ถูกนำมาวัด
+
+**Metrics** (relevance แบบ 0/1, เฉลี่ยต่อผู้ใช้):
+
+| Metric | ความหมาย |
+| --- | --- |
+| Recall@K | ถูกกี่ชิ้นจากทั้งหมดที่ผู้ใช้ทำจริง |
+| Hit@K | มีถูกอย่างน้อย 1 ชิ้นไหม |
+| NDCG@K | ถูกแล้วอยู่อันดับต้นหรือไม่ (ยิ่งอยู่บนยิ่งได้คะแนนมาก) |
+| MAP@K | เฉลี่ย precision ณ ตำแหน่งที่ถูก |
+| Coverage@K | สินค้ากี่ % ของแค็ตตาล็อกที่เคยถูกแนะนำ |
+
+- ใช้ Recall@200 ประเมิน candidate generation ด้วย (ขั้น ALS) และ NDCG@10 เป็นตัวตัดสิน promote
+- ทุกค่ามี **95% confidence interval** จาก bootstrap เพราะผู้ใช้ที่วัดได้มีแค่ ~1.9K คน ตัวเลขที่ช่วงทับกันถือว่าแยกกันไม่ได้
+- รายงานแยก **warm** (เคยอยู่ใน Train) กับ **cold** (ไม่เคยเห็น)
+- ทุก metric มี unit test เทียบกับค่าที่คำนวณมือ
+
+**Baselines** (ไม่ personalise แนะนำรายการเดียวกันทุกคน):
+
+| Baseline | วิธี |
+| --- | --- |
+| `random` | สุ่มสินค้า เป็นเส้นล่างสุดไว้เช็กว่าระบบวัดไม่ผิด |
+| `popular_all` | สินค้ายอดนิยมจาก Train ทั้งหมด ถ่วงน้ำหนัก view 1 / addtocart 3 / transaction 5 |
+| `popular_7d` | เหมือนกัน แต่นับเฉพาะ 7 วันสุดท้ายของ Train (เติมด้วย popular_all ถ้าไม่ครบ 200) |
+
+**ผลบน Val** (ทุกผู้ใช้, n = 1,941: warm 289, cold 1,652):
+
+| Model | Recall@10 | NDCG@10 | Recall@200 |
+| --- | --- | --- | --- |
+| random | 0.0005 | 0.0002 | 0.0018 |
+| popular_all | 0.0106 | 0.0082 | 0.0753 |
+| popular_7d | 0.0191 | 0.0102 | 0.1032 |
+
+- popularity ชนะ random ชัดเจน ส่วน popular_7d ดีกว่า popular_all ที่ Recall@10 และ Recall@200 (ช่วงความเชื่อมั่นไม่ทับกัน) แต่ที่ NDCG@10 ยังแยกไม่ออก
+- **เป้าหมายของโมเดล:** NDCG@10 ต้องดีกว่า 0.0102 และ Recall@200 ต้องดีกว่า 0.1032 อย่างมีนัยสำคัญ
+
+**วินัยของ Test:** ยังไม่ได้รัน baseline บน Test (`--split test` เตรียมไว้แล้ว) จะรันครั้งเดียวตอนรายงานโมเดลสุดท้าย
+
+**ข้อจำกัดที่รู้อยู่:** baseline ไม่ตัดสินค้าที่ผู้ใช้เคยทำไปแล้วออกจากรายการ และ ground truth มีแค่ ~1.9K ผู้ใช้ ผลจึงแกว่งง่าย
+
 ---
 
 ## ขั้นต่อไป
-**4. Evaluation และ baseline:** เขียน Recall@K, NDCG@K, MAP@K และทำ popularity baseline เพื่อเป็นเส้นเทียบให้โมเดล
+**5. Feature engineering:** สร้างฟีเจอร์ user / item / session / category จาก Train เท่านั้น (กัน leakage) และเขียน `schema.json`

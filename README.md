@@ -82,7 +82,7 @@
 - [x] Setup repo
 - [x] EDA
 - [x] ETL และแบ่งข้อมูลตามเวลา
-- [ ] Evaluation และ baseline
+- [x] Evaluation และ baseline
 - [ ] Feature engineering
 - [ ] ALS + Ranker
 - [ ] Serving, Streaming, Docker
