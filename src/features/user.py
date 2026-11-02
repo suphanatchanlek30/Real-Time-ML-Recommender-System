@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 import polars as pl
 
 from src.config import EVENT_WEIGHTS, SESSION_GAP_MINUTES
-from src.features.schema import DECAY_TAU_DAYS, RECENT_N
+from src.features.spec import DECAY_TAU_DAYS, RECENT_N
 
 DAY_MS = 86_400_000
 GAP = timedelta(minutes=SESSION_GAP_MINUTES)
