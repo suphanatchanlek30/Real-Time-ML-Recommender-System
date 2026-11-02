@@ -3,6 +3,10 @@
 import os
 from pathlib import Path
 
+from src.env import load_env
+
+load_env()  # values from .env (variables already set take precedence)
+
 N_CANDIDATES = 200  # items retrieved per user before the Ranker reorders them
 MIN_EVENTS = 2  # ALS only learns users/items with at least this many events (EDA: 62.6% of data)
 N_RANK_SNAPSHOTS = 4  # rolling snapshots the Ranker is trained on

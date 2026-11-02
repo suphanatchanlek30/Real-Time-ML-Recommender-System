@@ -4,6 +4,10 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.env import load_env
+
+load_env()  # values from .env (variables already set take precedence)
+
 DATA_DIR = Path(os.environ.get("DATA_DIR", "data"))
 RAW_DIR = DATA_DIR / "raw"
 PROCESSED_DIR = DATA_DIR / "processed"

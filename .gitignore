@@ -4,6 +4,7 @@ data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 data/features/
+models/
 
 # Python
 __pycache__/

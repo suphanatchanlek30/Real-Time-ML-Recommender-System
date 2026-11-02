@@ -67,7 +67,9 @@ def rerank(frame: pl.DataFrame, booster: lgb.Booster) -> dict[int, list[int]]:
     """Reorder every user's candidates by the ranker score. user -> items, best first."""
     scored = frame.with_columns(pl.Series("score", booster.predict(to_matrix(frame))))
     ranked = (
-        scored.sort(["visitorid", "score"], descending=[False, True])
+        # equal scores keep the retrieval order, so the ranking is deterministic (and the API,
+        # which does the same, returns the same list)
+        scored.sort(["visitorid", "score", "a_rank"], descending=[False, True, False])
         .group_by("visitorid", maintain_order=True)
         .agg(pl.col("itemid"))
     )

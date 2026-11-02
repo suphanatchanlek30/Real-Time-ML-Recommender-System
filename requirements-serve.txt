@@ -1,0 +1,10 @@
+# Runtime dependencies of the API and the stream consumer (no training libraries).
+numpy
+polars
+lightgbm
+fastapi
+uvicorn
+redis
+pydantic
+prometheus-client
+confluent-kafka

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import polars as pl
 
 from src.config import EVENT_WEIGHTS
-from src.features.schema import PRIOR_STRENGTH, WINDOWS_DAYS
+from src.features.spec import PRIOR_STRENGTH, WINDOWS_DAYS
 from src.features.user import DAY_MS
 
 

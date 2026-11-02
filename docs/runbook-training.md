@@ -13,8 +13,7 @@ deactivate 2>/dev/null; rm -rf .venv
 source .venv/bin/activate
 python --version        # ต้องเป็น Python 3.11.x
 pip install --upgrade pip
-make install-train      # ติดตั้ง polars, pandera, implicit, lightgbm, mlflow ฯลฯ (~1-2 นาที)
-pip install pytest ruff
+make install-all        # ติดตั้ง polars, pandera, implicit, lightgbm, mlflow, fastapi, pytest ฯลฯ (~2 นาที)
 ```
 
 ถ้ายังไม่มี Python 3.11: `brew install python@3.11`
@@ -22,7 +21,7 @@ pip install pytest ruff
 ## 1. เช็กว่าทุกอย่างพร้อม
 
 ```bash
-make test               # ต้องผ่านทั้งหมด (39 tests)
+make test               # ต้องผ่านทั้งหมด (66 tests, อีก 4 ข้ามเพราะต้องมี Docker)
 ls data/raw             # ต้องเห็น events.csv, item_properties_part*.csv, category_tree.csv
 ```
 
