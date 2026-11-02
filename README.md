@@ -86,15 +86,29 @@
 - [x] Feature engineering
 - [x] ALS + Ranker
 - [x] Serving, Streaming, Docker
-- [ ] Load test และ Monitoring
+- [x] Load test และ Monitoring
 
-รายละเอียดแต่ละขั้นอยู่ใน [docs/progress.md](docs/progress.md) วิธีรันเทรนอยู่ใน [docs/runbook-training.md](docs/runbook-training.md) และวิธีรันระบบออนไลน์อยู่ใน [docs/runbook-serving.md](docs/runbook-serving.md) ค่าตั้งค่าทั้งหมดอยู่ใน `.env` (คัดลอกจาก `.env.example`)
+รายละเอียดแต่ละขั้นอยู่ใน [docs/progress.md](docs/progress.md) วิธีรันเทรนอยู่ใน [docs/runbook-training.md](docs/runbook-training.md) วิธีรันระบบออนไลน์อยู่ใน [docs/runbook-serving.md](docs/runbook-serving.md) และวิธี load test อยู่ใน [docs/runbook-loadtest.md](docs/runbook-loadtest.md) ค่าตั้งค่าทั้งหมดอยู่ใน `.env` (คัดลอกจาก `.env.example`)
+
+## Results
+
+| | ผล |
+| --- | --- |
+| โมเดล (Validation, 1,941 ผู้ใช้) | NDCG@10 **0.033** เทียบกับ baseline popularity 0.010 และ Recall@200 0.126 เทียบกับ 0.103 ([รายละเอียด](docs/progress.md)) |
+| Load test 100 VUs | p95 **30 ms**, error 0%, 695 request/วินาที (ก่อนปรับปรุง 166 ms / 401) |
+| ความจุก่อน p95 เกิน 100 ms | ~1,360 request/วินาที (ก่อนปรับปรุง ~300) |
+
+![ก่อนและหลังปรับปรุง](docs/loadtest/comparison.png)
+
+ตัวเลข load test วัดบนเครื่องเดียวและรอบเดียวต่อชุดการตั้งค่า ดูข้อจำกัดใน [docs/loadtest.md](docs/loadtest.md)
 
 ## โครงสร้างโปรเจกต์
 
 ```text
 src/             # etl, features, training, evaluation, serving, streaming
 docker/          # Dockerfile ของ API และ consumer (docker-compose.yml และ .env.example อยู่ที่ root)
+monitoring/      # Prometheus และ Grafana (dashboard ถูกสร้างอัตโนมัติ)
+loadtest/        # สคริปต์ k6
 tests/           # pytest
 notebooks/       # EDA
 docs/            # progress log และภาพออกแบบระบบ (docs/diagrams)

@@ -1,6 +1,7 @@
 """Turn a load-test run into numbers and charts.
 
     python -m src.serving.loadtest_report results/baseline --title "Before"
+    python -m src.serving.loadtest_report results/a results/b --compare "Before" "After"
 
 Reads results/<label>/{load,stress}.json (k6 summaries) and the matching *.window.json (start and
 end time of the run), asks Prometheus for the server-side series of that window and writes
@@ -164,13 +165,74 @@ def report_scenario(folder: Path, scenario: str, title: str) -> dict | None:
     return result
 
 
+def plot_comparison(stages: list[dict], out: Path) -> None:
+    """Bars for the headline numbers of each stage. `stages`: label, load (summary), knee_rps."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    labels = [s["label"] for s in stages]
+    colors = ["#d6403f", "#e69f00", "#3aa655", "#2a6fdb"][: len(stages)]
+    fig, ax = plt.subplots(1, 3, figsize=(14, 4.2))
+
+    def bars(a, values, title, unit, limit=None):
+        shown = [v if v is not None else 0 for v in values]
+        a.bar(labels, shown, color=colors)
+        for i, v in enumerate(values):
+            a.text(
+                i, (v or 0) * 1.01, "n/a" if v is None else f"{v:,.0f}", ha="center", va="bottom"
+            )
+        if limit:
+            a.axhline(limit, color="red", linestyle=":")
+        a.set(title=title, ylabel=unit)
+        a.tick_params(axis="x", labelsize=8)
+
+    bars(ax[0], [s["load"]["p95"] for s in stages], "Load test (100 VUs): p95 latency", "ms", 100)
+    bars(
+        ax[1], [s["load"]["rate"] for s in stages], "Load test (100 VUs): requests served", "req/s"
+    )
+    bars(ax[2], [s["knee_rps"] for s in stages], "Stress: rate held before p95 > 100 ms", "req/s")
+    fig.tight_layout()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=110)
+    plt.close(fig)
+
+
+def compare(folders: list[Path], labels: list[str]) -> Path:
+    stages = []
+    for folder, label in zip(folders, labels):
+        stress = report_scenario(folder, "stress", label)
+        stages.append(
+            {
+                "label": label,
+                "load": summarize_k6(folder / "load.json"),
+                "knee_rps": stress["knee"]["sustained_rps"] if stress and stress["knee"] else None,
+            }
+        )
+    out = OUT_DIR / "comparison.png"
+    plot_comparison(stages, out)
+    return out
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("folder", type=Path)
+    parser.add_argument("folder", type=Path, nargs="+")
     parser.add_argument("--title", default=None)
+    parser.add_argument(
+        "--compare",
+        nargs="*",
+        default=None,
+        metavar="LABEL",
+        help="one label per folder: draw the before/after comparison chart",
+    )
     args = parser.parse_args()
-    title = args.title or args.folder.name
-    results = [r for s in ("load", "stress") if (r := report_scenario(args.folder, s, title))]
+    if args.compare is not None:
+        print(compare(args.folder, args.compare))
+        return
+    folder = args.folder[0]
+    title = args.title or folder.name
+    results = [r for s in ("load", "stress") if (r := report_scenario(folder, s, title))]
     print(json.dumps(results, indent=2, default=str))
 
 
