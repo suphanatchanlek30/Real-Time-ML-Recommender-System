@@ -1,0 +1,6 @@
+# Test and lint tools (the serving tests also need requirements-serve.txt)
+pytest
+ruff
+fakeredis
+httpx
+matplotlib

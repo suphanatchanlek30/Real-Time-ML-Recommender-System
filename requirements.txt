@@ -1,0 +1,7 @@
+# Data
+polars
+pyarrow
+pandera[polars]
+numpy
+kaggle
+six  # required by kaggle CLI but not declared by it

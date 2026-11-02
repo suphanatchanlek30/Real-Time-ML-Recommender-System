@@ -1,0 +1,5 @@
+{
+  "factors": 128,
+  "regularization": 0.01,
+  "alpha": 40.0
+}
