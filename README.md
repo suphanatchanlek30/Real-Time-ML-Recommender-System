@@ -85,15 +85,16 @@
 - [x] Evaluation และ baseline
 - [x] Feature engineering
 - [x] ALS + Ranker
-- [ ] Serving, Streaming, Docker
+- [x] Serving, Streaming, Docker
 - [ ] Load test และ Monitoring
 
-รายละเอียดแต่ละขั้นอยู่ใน [docs/progress.md](docs/progress.md) และวิธีรันเทรนเองอยู่ใน [docs/runbook-training.md](docs/runbook-training.md)
+รายละเอียดแต่ละขั้นอยู่ใน [docs/progress.md](docs/progress.md) วิธีรันเทรนอยู่ใน [docs/runbook-training.md](docs/runbook-training.md) และวิธีรันระบบออนไลน์อยู่ใน [docs/runbook-serving.md](docs/runbook-serving.md)
 
 ## โครงสร้างโปรเจกต์
 
 ```text
 src/             # etl, features, training, evaluation, serving, streaming
+docker/          # Dockerfile ของ API และ consumer (docker-compose.yml อยู่ที่ root)
 tests/           # pytest
 notebooks/       # EDA
 docs/            # progress log และภาพออกแบบระบบ (docs/diagrams)

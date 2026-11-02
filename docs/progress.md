@@ -11,7 +11,7 @@
 | ✅ | 4. Evaluation และ baseline | `3386a8a` |
 | ✅ | 5. Feature engineering | `b0f1e42` |
 | ✅ | 6. ALS + Ranker | `c819ad9` |
-| ⬜ | 7. Serving, Streaming, Docker | - |
+| ✅ | 7. Serving, Streaming, Docker | `fa8ffa9`, `b306328`, `9da1f4b`, `c5b1c8b` |
 | ⬜ | 8. Load test และ Monitoring | - |
 
 ---
@@ -187,7 +187,54 @@
 - **จูน ALS วัดจากผู้ใช้ 182 คน** และค่าที่ดีที่สุด (factors 128) อยู่ขอบของตาราง ยังลอง 256 ได้
 - Val ถูกใช้ทั้งจูนและตัดสิน gate จึงมีความเอนเอียงเล็กน้อย ตัวเลขที่เชื่อได้จริงคือ Test ซึ่ง **ยังไม่ได้แตะ**
 
+## 7. Serving, Streaming, Docker
+โค้ด: [src/serving/](../src/serving/), [src/streaming/](../src/streaming/), [docker-compose.yml](../docker-compose.yml) วิธีรันอยู่ใน [runbook-serving.md](runbook-serving.md) (`make up`, `make replay`, `make smoke`)
+
+**ระบบที่ได้:** `Kafka (user-events) → consumer → Redis → FastAPI` โดย API โหลดโมเดลจาก `models/champion/` (ดึงจาก MLflow ด้วย `make pull-model`)
+
+| ส่วน | ทำอะไร |
+| --- | --- |
+| `recommender.py` | ดึง candidate 200 ตัว (ALS สำหรับผู้ใช้ที่ ALS รู้จัก, popular สำหรับที่เหลือ) → สร้างฟีเจอร์ 38 ตัว → Ranker เรียง |
+| `feature_store.py` | โครง Redis, ตัวจัดการ event ทีละตัว, ตัวโหลด state ตั้งต้น, ตัวอ่านผู้ใช้ (1 round trip) |
+| `app.py` | `/recommend`, `/health`, `/metrics` (Prometheus), `/admin/reload` |
+| `streaming/producer.py` | replay event เรียงตามเวลา key = `visitor_id` |
+| `streaming/consumer.py` | ตรวจ schema แล้วอัปเดต Redis ทีละ batch |
+
+**การตัดสินใจสำคัญ (และต่างจากแผนเดิมตรงไหน):**
+
+1. **Event-time clock ไม่ใช่เวลาจริง** ข้อมูลเป็นปี 2015 ถ้าใช้เวลาเครื่อง recency จะเป็น ~4,000 วันและ decayed sums เป็น 0 ทุกคน จึงเก็บเวลาของ event ล่าสุดไว้ใน Redis (`clock`) และคำนวณฟีเจอร์ ณ เวลานั้น
+2. **จุดเริ่มต้นเดียวกับ champion:** โหลด state ตั้งต้น ณ `val_start` (ตรงกับที่ ALS และ Ranker เทรน) แล้ว replay เฉพาะ event หลังจากนั้น ไม่ต้องสร้าง snapshot ใหม่ และ `make replay` ล้าง Redis ก่อนทุกครั้งจึงไม่นับซ้ำ
+3. **ไม่ใช้ TTL** (แผนเดิมมี) เพราะ state ที่หมดอายุจะทำให้ฟีเจอร์ online ต่างจากที่โมเดลเรียนมา
+4. **กัน skew ของ pair features:** แผนเดิมเก็บแค่ 20 สินค้าล่าสุด แต่ตอนเทรนนับจากประวัติทั้งหมด จึงเก็บ hash จำนวน view/cart/buy ต่อสินค้า (`user:{id}:items`) และจำนวนต่อหมวด (`user:{id}:cats`) เพิ่ม (`user:{id}:recent` ยังเก็บไว้ตามข้อตกลง)
+5. **ฟีเจอร์ผู้ใช้ใช้โค้ดชุดเดียวกับ offline** (`derive_user_features`) ส่วนฟีเจอร์สินค้าโหลดเป็น numpy ตอน startup เพื่อให้ request ละไม่กี่ ms
+6. **Redis ช้า/ล่ม:** timeout 50 ms แล้วตอบด้วย Ranker โดยไม่มีฟีเจอร์ผู้ใช้ (`degraded: true`); Ranker พัง → ตอบ popular list (`source: popular_fallback`)
+7. **Reload ปลอดภัย:** สร้างโมเดลใหม่ให้เสร็จและตรวจก่อน (ลำดับฟีเจอร์ต้องตรง `spec.py`, snapshot ต้องตรง) ถ้าไม่ผ่านตอบ 409 และใช้โมเดลเดิมต่อ ทดสอบกับ stack จริงแล้ว
+
+**ผลที่วัดได้** (MacBook, Docker Desktop):
+
+| รายการ | ค่า |
+| --- | --- |
+| โหลด state ตั้งต้นเข้า Redis | 1,279,697 ผู้ใช้ใน 28 วินาที, 5.1 ล้าน keys, ใช้ RAM ~720 MB |
+| Replay | 233,717 events ที่ 2,000/วินาที (~2 นาที) consumer ตามทัน (lag 0) |
+| Latency ของ `/recommend` ผ่าน HTTP | p50 3.9 ms, p95 9.7 ms, p99 14.1 ms (ยิงทีละ request 612 ครั้ง ยังไม่ใช่การทดสอบภายใต้โหลด) |
+| ส่วนที่กินเวลาในโค้ด | ดึง candidate ~1.7 ms, สร้างฟีเจอร์ ~0.7 ms, Ranker ~0.1 ms |
+
+**การทดสอบ:**
+- **offline = online:** บนข้อมูลสังเคราะห์ ฟีเจอร์ผู้ใช้และ pair features ที่คำนวณจาก Redis (เติมด้วย stream) เท่ากับ offline; บนโมเดล champion จริงกับผู้ใช้ 120 คน ฟีเจอร์และลำดับที่ API แนะนำเท่ากับเส้นทางตอนเทรนทุกตัว
+- API: contract, validation, Redis ล่ม, Ranker พัง, reload, token
+- `make smoke`: ยิง event เข้า Kafka จริงแล้วเช็กว่าไปถึง Redis และ API ตอบได้
+
+**บั๊กที่เจอจากการทดสอบจริง:** ตอนจำลอง consumer ล้ม (docker kill) กลาง replay Kafka ส่ง batch เดิมซ้ำ ทำให้ผู้ใช้ **343 คน** ถูกนับ event ซ้ำ (ตรวจเทียบทั้ง 1.4 ล้านคนกับข้อมูลจริง) แก้โดยเก็บ offset ล่าสุดที่ใช้แล้วไว้ใน Redis ใน transaction เดียวกับการอัปเดต state หลังแก้ ทดสอบซ้ำแบบเดียวกันแล้วผิด 0 คน มี unit test ครอบคลุม
+
+**ข้อจำกัดที่รู้อยู่:**
+- **ผลแนะนำเปลี่ยนตาม session แต่เปลี่ยนไม่มาก** ผู้ใช้ cold ได้ candidate จาก popular เท่านั้น สินค้าที่เพิ่งดู/ใส่ตะกร้าจึงไม่ถูกดึงเข้ามา ฟีเจอร์ที่เปลี่ยนมีผลแค่ผ่านฟีเจอร์ผู้ใช้ ส่วนผู้ใช้ที่ ALS รู้จักจะเห็น pair features ทำงานเต็มที่ การดึง candidate จาก session (ต้องเทรนใหม่เพื่อให้ Ranker เคยเห็น candidate แบบนี้) เป็นงานต่อยอด
+- โปรโตคอลประเมินแบบ snapshot ต้นสัปดาห์ จึงวัดผลของ session features ไม่ได้ (เขียนไว้ตั้งแต่ขั้น 5)
+- Popular list ใน bundle ถูกตรึง ณ เวลาเทรน; ฟีเจอร์สินค้า/หมวดเป็น batch (รีเฟรชด้วยการรัน `make features` ใหม่)
+- Replay วิ่งเลย `val_start` ไปถึงช่วง Test (4-18 ก.ย.) เพราะแค่ให้ stack มีข้อมูลสด ไม่ได้ใช้ประเมินอะไร
+- MLflow ยังอยู่บนเครื่อง (SQLite) ไม่อยู่ใน compose; API worker เดียว; `/admin/reload` ป้องกันด้วย `ADMIN_TOKEN` ถ้าตั้งไว้เท่านั้น
+- Kafka/consumer ทดสอบกับ stack จริงบนเครื่องเดียว ไม่ได้ทดสอบหลาย consumer หรือหลาย broker
+
 ---
 
 ## ขั้นต่อไป
-**7. Serving, Streaming, Docker:** FastAPI (`/recommend`, `/health`, `/metrics`, `/admin/reload`) โหลด bundle ที่ alias `champion`, Kafka → Redis อัปเดตฟีเจอร์ผู้ใช้ด้วย `update_user_state`, รันทั้งระบบด้วย Docker Compose
+**8. Load test และ Monitoring:** Prometheus + Grafana (`/metrics` พร้อมแล้ว), k6 แบบ smoke/load/stress พร้อม threshold (เป้าหมาย p95 < 100 ms, error < 1%) เทียบก่อน/หลัง optimize และ GitHub Actions
