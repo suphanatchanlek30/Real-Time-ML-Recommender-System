@@ -1,0 +1,952 @@
+{
+  "info": {
+    "name": "Recommender API",
+    "description": "Test cases for the real-time recommender API. Send any request on its own, or run the whole collection with the Collection Runner (every request has tests and none depends on another).\n\nStart the system first (`make up` and `make replay`), then import this collection and the `local` environment.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Health and metrics",
+      "item": [
+        {
+          "name": "Health: model loaded and Redis reachable",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health"
+              ],
+              "query": []
+            },
+            "description": "Is the API up, which model is loaded and can it reach Redis. event_clock is the event time of the newest streamed event (null until `make replay` has run)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"status ok\", () => pm.expect(b.status).to.equal(\"ok\"));",
+                  "pm.test(\"a model version is loaded\", () => pm.expect(b.model_version).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"Redis reachable\", () => pm.expect(b.redis).to.equal(true));",
+                  "pm.test(\"model and feature snapshot are the same one\", () => pm.expect(b.snapshot_as_of).to.be.a(\"string\"));",
+                  "pm.collectionVariables.set(\"model_version\", b.model_version);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Metrics: Prometheus text",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/metrics",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "metrics"
+              ],
+              "query": []
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.text();",
+                  "pm.test(\"is Prometheus text\", () => pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"text/plain\"));",
+                  "pm.test(\"has the latency histogram\", () => pm.expect(t).to.include(\"http_request_duration_seconds_bucket\"));",
+                  "pm.test(\"has request counters\", () => pm.expect(t).to.include(\"http_requests_total\"));",
+                  "pm.test(\"has the answer-source counter\", () => pm.expect(t).to.include(\"recommend_source_total\"));",
+                  "pm.test(\"has the Redis error counter\", () => pm.expect(t).to.include(\"redis_errors_total\"));",
+                  "pm.sendRequest(pm.variables.replaceIn(\"{{base_url}}/health\"), (err, res) => {",
+                  "  pm.test(\"shows the loaded model version\", () => {",
+                  "    pm.expect(err).to.equal(null);",
+                  "    pm.expect(t).to.include(\"model_info{version=\\\"\" + res.json().model_version + \"\\\"}\");",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": ""
+    },
+    {
+      "name": "2. Recommend",
+      "item": [
+        {
+          "name": "Known user (ALS knows them), k=10",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/recommend?user_id={{known_user}}&k=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recommend"
+              ],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "{{known_user}}"
+                },
+                {
+                  "key": "k",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "A user with enough history for ALS: candidates come from ALS, then the Ranker reorders them."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"has items, model_version, source, retrieval, degraded\", () => {",
+                  "  pm.expect(body).to.have.all.keys(\"items\", \"model_version\", \"source\", \"retrieval\", \"degraded\");",
+                  "});",
+                  "pm.test(\"returns exactly 10 items\", () => pm.expect(body.items).to.have.lengthOf(10));",
+                  "pm.test(\"every item has an integer item_id and a numeric score\", () => {",
+                  "  body.items.forEach(i => { pm.expect(Number.isInteger(i.item_id)).to.be.true; pm.expect(i.score).to.be.a(\"number\"); });",
+                  "});",
+                  "pm.test(\"scores are sorted from best to worst\", () => {",
+                  "  const s = body.items.map(i => i.score);",
+                  "  for (let n = 1; n < s.length; n++) pm.expect(s[n - 1]).to.be.at.least(s[n]);",
+                  "});",
+                  "pm.test(\"no item is repeated\", () => {",
+                  "  const ids = body.items.map(i => i.item_id);",
+                  "  pm.expect(new Set(ids).size).to.equal(ids.length);",
+                  "});",
+                  "pm.test(\"source is ranker and Redis was reachable (not degraded)\", () => {",
+                  "  pm.expect(body.source).to.equal(\"ranker\"); pm.expect(body.degraded).to.equal(false);",
+                  "});",
+                  "pm.test(\"X-Model-Version header equals model_version in the body\", () => {",
+                  "  pm.expect(pm.response.headers.get(\"X-Model-Version\")).to.equal(body.model_version);",
+                  "});",
+                  "pm.test(\"candidates came from als\", () => pm.expect(body.retrieval).to.equal(\"als\"));",
+                  "pm.test(\"answers in under 250 ms\", () => pm.expect(pm.response.responseTime).to.be.below(250));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Known user again: same answer (deterministic)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/recommend?user_id={{known_user}}&k=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recommend"
+              ],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "{{known_user}}"
+                },
+                {
+                  "key": "k",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.sendRequest(pm.variables.replaceIn(\"{{base_url}}/recommend?user_id={{known_user}}&k=10\"), (err, other) => {",
+                  "  pm.test(\"same user, same state: the same 10 items in the same order\", () => {",
+                  "    pm.expect(err, \"the second request must succeed\").to.equal(null);",
+                  "    pm.expect(other.json().items.map(i => i.item_id)).to.eql(body.items.map(i => i.item_id));",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "User with history but unknown to ALS",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/recommend?user_id={{history_user}}&k=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recommend"
+              ],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "{{history_user}}"
+                },
+                {
+                  "key": "k",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Has events in Redis but too few for ALS: candidates are the popular list, ranked with the user's own features."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"has items, model_version, source, retrieval, degraded\", () => {",
+                  "  pm.expect(body).to.have.all.keys(\"items\", \"model_version\", \"source\", \"retrieval\", \"degraded\");",
+                  "});",
+                  "pm.test(\"returns exactly 10 items\", () => pm.expect(body.items).to.have.lengthOf(10));",
+                  "pm.test(\"every item has an integer item_id and a numeric score\", () => {",
+                  "  body.items.forEach(i => { pm.expect(Number.isInteger(i.item_id)).to.be.true; pm.expect(i.score).to.be.a(\"number\"); });",
+                  "});",
+                  "pm.test(\"scores are sorted from best to worst\", () => {",
+                  "  const s = body.items.map(i => i.score);",
+                  "  for (let n = 1; n < s.length; n++) pm.expect(s[n - 1]).to.be.at.least(s[n]);",
+                  "});",
+                  "pm.test(\"no item is repeated\", () => {",
+                  "  const ids = body.items.map(i => i.item_id);",
+                  "  pm.expect(new Set(ids).size).to.equal(ids.length);",
+                  "});",
+                  "pm.test(\"source is ranker and Redis was reachable (not degraded)\", () => {",
+                  "  pm.expect(body.source).to.equal(\"ranker\"); pm.expect(body.degraded).to.equal(false);",
+                  "});",
+                  "pm.test(\"X-Model-Version header equals model_version in the body\", () => {",
+                  "  pm.expect(pm.response.headers.get(\"X-Model-Version\")).to.equal(body.model_version);",
+                  "});",
+                  "pm.test(\"candidates came from popular\", () => pm.expect(body.retrieval).to.equal(\"popular\"));",
+                  "pm.test(\"answers in under 250 ms\", () => pm.expect(pm.response.responseTime).to.be.below(250));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Brand-new user (cold start)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/recommend?user_id={{new_user}}&k=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recommend"
+              ],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "{{new_user}}"
+                },
+                {
+                  "key": "k",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Nobody knows this user: popular candidates, ranked with empty user features."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"has items, model_version, source, retrieval, degraded\", () => {",
+                  "  pm.expect(body).to.have.all.keys(\"items\", \"model_version\", \"source\", \"retrieval\", \"degraded\");",
+                  "});",
+                  "pm.test(\"returns exactly 10 items\", () => pm.expect(body.items).to.have.lengthOf(10));",
+                  "pm.test(\"every item has an integer item_id and a numeric score\", () => {",
+                  "  body.items.forEach(i => { pm.expect(Number.isInteger(i.item_id)).to.be.true; pm.expect(i.score).to.be.a(\"number\"); });",
+                  "});",
+                  "pm.test(\"scores are sorted from best to worst\", () => {",
+                  "  const s = body.items.map(i => i.score);",
+                  "  for (let n = 1; n < s.length; n++) pm.expect(s[n - 1]).to.be.at.least(s[n]);",
+                  "});",
+                  "pm.test(\"no item is repeated\", () => {",
+                  "  const ids = body.items.map(i => i.item_id);",
+                  "  pm.expect(new Set(ids).size).to.equal(ids.length);",
+                  "});",
+                  "pm.test(\"source is ranker and Redis was reachable (not degraded)\", () => {",
+                  "  pm.expect(body.source).to.equal(\"ranker\"); pm.expect(body.degraded).to.equal(false);",
+                  "});",
+                  "pm.test(\"X-Model-Version header equals model_version in the body\", () => {",
+                  "  pm.expect(pm.response.headers.get(\"X-Model-Version\")).to.equal(body.model_version);",
+                  "});",
+                  "pm.test(\"candidates came from popular\", () => pm.expect(body.retrieval).to.equal(\"popular\"));",
+                  "pm.test(\"answers in under 250 ms\", () => pm.expect(pm.response.responseTime).to.be.below(250));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Another brand-new user: same list (shared answer)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/recommend?user_id={{new_user_2}}&k=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recommend"
+              ],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "{{new_user_2}}"
+                },
+                {
+                  "key": "k",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.sendRequest(pm.variables.replaceIn(\"{{base_url}}/recommend?user_id={{new_user}}&k=10\"), (err, other) => {",
+                  "  pm.test(\"all brand-new users get the same list (it is computed once per model)\", () => {",
+                  "    pm.expect(err, \"the second request must succeed\").to.equal(null);",
+                  "    pm.expect(other.json().items.map(i => i.item_id)).to.eql(body.items.map(i => i.item_id));",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "k=1",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/recommend?user_id={{known_user}}&k=1",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recommend"
+              ],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "{{known_user}}"
+                },
+                {
+                  "key": "k",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"has items, model_version, source, retrieval, degraded\", () => {",
+                  "  pm.expect(body).to.have.all.keys(\"items\", \"model_version\", \"source\", \"retrieval\", \"degraded\");",
+                  "});",
+                  "pm.test(\"returns exactly 1 items\", () => pm.expect(body.items).to.have.lengthOf(1));",
+                  "pm.test(\"every item has an integer item_id and a numeric score\", () => {",
+                  "  body.items.forEach(i => { pm.expect(Number.isInteger(i.item_id)).to.be.true; pm.expect(i.score).to.be.a(\"number\"); });",
+                  "});",
+                  "pm.test(\"scores are sorted from best to worst\", () => {",
+                  "  const s = body.items.map(i => i.score);",
+                  "  for (let n = 1; n < s.length; n++) pm.expect(s[n - 1]).to.be.at.least(s[n]);",
+                  "});",
+                  "pm.test(\"no item is repeated\", () => {",
+                  "  const ids = body.items.map(i => i.item_id);",
+                  "  pm.expect(new Set(ids).size).to.equal(ids.length);",
+                  "});",
+                  "pm.test(\"source is ranker and Redis was reachable (not degraded)\", () => {",
+                  "  pm.expect(body.source).to.equal(\"ranker\"); pm.expect(body.degraded).to.equal(false);",
+                  "});",
+                  "pm.test(\"X-Model-Version header equals model_version in the body\", () => {",
+                  "  pm.expect(pm.response.headers.get(\"X-Model-Version\")).to.equal(body.model_version);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "k=100 (the maximum)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/recommend?user_id={{known_user}}&k=100",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recommend"
+              ],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "{{known_user}}"
+                },
+                {
+                  "key": "k",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"has items, model_version, source, retrieval, degraded\", () => {",
+                  "  pm.expect(body).to.have.all.keys(\"items\", \"model_version\", \"source\", \"retrieval\", \"degraded\");",
+                  "});",
+                  "pm.test(\"returns exactly 100 items\", () => pm.expect(body.items).to.have.lengthOf(100));",
+                  "pm.test(\"every item has an integer item_id and a numeric score\", () => {",
+                  "  body.items.forEach(i => { pm.expect(Number.isInteger(i.item_id)).to.be.true; pm.expect(i.score).to.be.a(\"number\"); });",
+                  "});",
+                  "pm.test(\"scores are sorted from best to worst\", () => {",
+                  "  const s = body.items.map(i => i.score);",
+                  "  for (let n = 1; n < s.length; n++) pm.expect(s[n - 1]).to.be.at.least(s[n]);",
+                  "});",
+                  "pm.test(\"no item is repeated\", () => {",
+                  "  const ids = body.items.map(i => i.item_id);",
+                  "  pm.expect(new Set(ids).size).to.equal(ids.length);",
+                  "});",
+                  "pm.test(\"source is ranker and Redis was reachable (not degraded)\", () => {",
+                  "  pm.expect(body.source).to.equal(\"ranker\"); pm.expect(body.degraded).to.equal(false);",
+                  "});",
+                  "pm.test(\"X-Model-Version header equals model_version in the body\", () => {",
+                  "  pm.expect(pm.response.headers.get(\"X-Model-Version\")).to.equal(body.model_version);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "k omitted: defaults to 10",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/recommend?user_id={{known_user}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recommend"
+              ],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "{{known_user}}"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"has items, model_version, source, retrieval, degraded\", () => {",
+                  "  pm.expect(body).to.have.all.keys(\"items\", \"model_version\", \"source\", \"retrieval\", \"degraded\");",
+                  "});",
+                  "pm.test(\"returns exactly 10 items\", () => pm.expect(body.items).to.have.lengthOf(10));",
+                  "pm.test(\"every item has an integer item_id and a numeric score\", () => {",
+                  "  body.items.forEach(i => { pm.expect(Number.isInteger(i.item_id)).to.be.true; pm.expect(i.score).to.be.a(\"number\"); });",
+                  "});",
+                  "pm.test(\"scores are sorted from best to worst\", () => {",
+                  "  const s = body.items.map(i => i.score);",
+                  "  for (let n = 1; n < s.length; n++) pm.expect(s[n - 1]).to.be.at.least(s[n]);",
+                  "});",
+                  "pm.test(\"no item is repeated\", () => {",
+                  "  const ids = body.items.map(i => i.item_id);",
+                  "  pm.expect(new Set(ids).size).to.equal(ids.length);",
+                  "});",
+                  "pm.test(\"source is ranker and Redis was reachable (not degraded)\", () => {",
+                  "  pm.expect(body.source).to.equal(\"ranker\"); pm.expect(body.degraded).to.equal(false);",
+                  "});",
+                  "pm.test(\"X-Model-Version header equals model_version in the body\", () => {",
+                  "  pm.expect(pm.response.headers.get(\"X-Model-Version\")).to.equal(body.model_version);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "k=5 is the top of k=10",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/recommend?user_id={{known_user}}&k=5",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recommend"
+              ],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "{{known_user}}"
+                },
+                {
+                  "key": "k",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.sendRequest(pm.variables.replaceIn(\"{{base_url}}/recommend?user_id={{known_user}}&k=10\"), (err, other) => {",
+                  "  pm.test(\"the 5 items are the first 5 of the 10\", () => {",
+                  "    pm.expect(err, \"the second request must succeed\").to.equal(null);",
+                  "    pm.expect(body.items.map(i => i.item_id)).to.eql(other.json().items.slice(0, 5).map(i => i.item_id));",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Each request is independent: those that compare with another answer fetch it themselves."
+    },
+    {
+      "name": "3. Input validation",
+      "item": [
+        {
+          "name": "k=0 is rejected",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/recommend?user_id={{known_user}}&k=0",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recommend"
+              ],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "{{known_user}}"
+                },
+                {
+                  "key": "k",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"rejected with 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"body explains what is wrong (detail)\", () => pm.expect(pm.response.json()).to.have.property(\"detail\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "k=101 is rejected",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/recommend?user_id={{known_user}}&k=101",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recommend"
+              ],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "{{known_user}}"
+                },
+                {
+                  "key": "k",
+                  "value": "101"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"rejected with 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"body explains what is wrong (detail)\", () => pm.expect(pm.response.json()).to.have.property(\"detail\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "negative user_id is rejected",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/recommend?user_id=-1",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recommend"
+              ],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "-1"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"rejected with 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"body explains what is wrong (detail)\", () => pm.expect(pm.response.json()).to.have.property(\"detail\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "user_id that is not a number is rejected",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/recommend?user_id=abc",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recommend"
+              ],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "abc"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"rejected with 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"body explains what is wrong (detail)\", () => pm.expect(pm.response.json()).to.have.property(\"detail\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "missing user_id is rejected",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/recommend",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recommend"
+              ],
+              "query": []
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"rejected with 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"body explains what is wrong (detail)\", () => pm.expect(pm.response.json()).to.have.property(\"detail\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Bad input must be rejected with 422, never a 500."
+    },
+    {
+      "name": "4. Admin",
+      "item": [
+        {
+          "name": "Reload with the right token (or no token when none is set)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Admin-Token",
+                "value": "{{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/reload",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "reload"
+              ],
+              "query": []
+            },
+            "description": "Builds the model again from models/champion and swaps it in. If ADMIN_TOKEN is set in .env, put the same value in the admin_token variable."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test(\"reports previous and current model version\", () => pm.expect(b).to.have.all.keys(\"previous_version\", \"model_version\"));",
+                  "pm.sendRequest(pm.variables.replaceIn(\"{{base_url}}/health\"), (err, res) => {",
+                  "  pm.test(\"same model is loaded again (nothing was changed)\", () => {",
+                  "    pm.expect(err).to.equal(null);",
+                  "    pm.expect(b.model_version).to.equal(res.json().model_version);",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reload with a wrong token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Admin-Token",
+                "value": "wrong-token"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/admin/reload",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "admin",
+                "reload"
+              ],
+              "query": []
+            },
+            "description": "Only rejected when ADMIN_TOKEN is set in .env; with no token configured the endpoint is open."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const tokenIsSet = !!(pm.environment.get(\"admin_token\") || pm.collectionVariables.get(\"admin_token\"));",
+                  "pm.test(tokenIsSet ? \"403 because the token is wrong\" : \"200 because no ADMIN_TOKEN is configured (nothing to check)\", () => {",
+                  "  pm.response.to.have.status(tokenIsSet ? 403 : 200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Recommendations still work after the reload",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/recommend?user_id={{known_user}}&k=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "recommend"
+              ],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "{{known_user}}"
+                },
+                {
+                  "key": "k",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"has items, model_version, source, retrieval, degraded\", () => {",
+                  "  pm.expect(body).to.have.all.keys(\"items\", \"model_version\", \"source\", \"retrieval\", \"degraded\");",
+                  "});",
+                  "pm.test(\"returns exactly 10 items\", () => pm.expect(body.items).to.have.lengthOf(10));",
+                  "pm.test(\"every item has an integer item_id and a numeric score\", () => {",
+                  "  body.items.forEach(i => { pm.expect(Number.isInteger(i.item_id)).to.be.true; pm.expect(i.score).to.be.a(\"number\"); });",
+                  "});",
+                  "pm.test(\"scores are sorted from best to worst\", () => {",
+                  "  const s = body.items.map(i => i.score);",
+                  "  for (let n = 1; n < s.length; n++) pm.expect(s[n - 1]).to.be.at.least(s[n]);",
+                  "});",
+                  "pm.test(\"no item is repeated\", () => {",
+                  "  const ids = body.items.map(i => i.item_id);",
+                  "  pm.expect(new Set(ids).size).to.equal(ids.length);",
+                  "});",
+                  "pm.test(\"source is ranker and Redis was reachable (not degraded)\", () => {",
+                  "  pm.expect(body.source).to.equal(\"ranker\"); pm.expect(body.degraded).to.equal(false);",
+                  "});",
+                  "pm.test(\"X-Model-Version header equals model_version in the body\", () => {",
+                  "  pm.expect(pm.response.headers.get(\"X-Model-Version\")).to.equal(body.model_version);",
+                  "});",
+                  "pm.test(\"candidates came from als\", () => pm.expect(body.retrieval).to.equal(\"als\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "description": ""
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "known_user",
+      "value": "9145"
+    },
+    {
+      "key": "history_user",
+      "value": "10025"
+    },
+    {
+      "key": "new_user",
+      "value": "99999999"
+    },
+    {
+      "key": "new_user_2",
+      "value": "88888888"
+    },
+    {
+      "key": "admin_token",
+      "value": ""
+    }
+  ]
+}
