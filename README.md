@@ -84,11 +84,11 @@
 - [x] ETL และแบ่งข้อมูลตามเวลา
 - [x] Evaluation และ baseline
 - [x] Feature engineering
-- [ ] ALS + Ranker
+- [x] ALS + Ranker
 - [ ] Serving, Streaming, Docker
 - [ ] Load test และ Monitoring
 
-รายละเอียดแต่ละขั้นอยู่ใน [docs/progress.md](docs/progress.md)
+รายละเอียดแต่ละขั้นอยู่ใน [docs/progress.md](docs/progress.md) และวิธีรันเทรนเองอยู่ใน [docs/runbook-training.md](docs/runbook-training.md)
 
 ## โครงสร้างโปรเจกต์
 

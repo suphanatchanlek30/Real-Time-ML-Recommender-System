@@ -10,7 +10,7 @@
 | ✅ | 3. ETL และแบ่งข้อมูลตามเวลา | `4de5fa3` |
 | ✅ | 4. Evaluation และ baseline | `3386a8a` |
 | ✅ | 5. Feature engineering | `b0f1e42` |
-| ⬜ | 6. ALS + Ranker | - |
+| ✅ | 6. ALS + Ranker | `c819ad9` |
 | ⬜ | 7. Serving, Streaming, Docker | - |
 | ⬜ | 8. Load test และ Monitoring | - |
 
@@ -124,11 +124,11 @@
 
 | Snapshot | as_of | labels | ใช้ทำ |
 | --- | --- | --- | --- |
-| `rank_train` | val_start - 7 วัน | 7 วันสุดท้ายของ Train | เทรน Ranker (ฟีเจอร์จากอดีต, label จาก "อนาคต") |
+| `rank_1` ... `rank_4` | val_start - 7k วัน | 7 วันถัดไป (อยู่ใน Train ทั้งหมด) | เทรน Ranker (ฟีเจอร์จากอดีต, label จาก "อนาคต") ใช้ 4 ช่วงต่อเนื่องเพื่อให้มีผู้ใช้ที่มี label มากพอ |
 | `val` | val_start | ช่วง Val | เลือกโมเดล |
 | `test` | test_start (history = Train + Val) | ช่วง Test | รายงานผลสุดท้าย |
 
-**ฟีเจอร์ 35 ตัว** (นิยามทั้งหมดใน [schema.py](../src/features/schema.py) ที่เดียว ใช้สร้าง Pandera schema และ `schema.json` อัตโนมัติ):
+**ฟีเจอร์ 38 ตัว** (นิยามทั้งหมดใน [schema.py](../src/features/schema.py) ที่เดียว ใช้สร้าง Pandera schema และ `schema.json` อัตโนมัติ):
 
 | กลุ่ม | ตัวอย่าง | หมายเหตุ |
 | --- | --- | --- |
@@ -136,6 +136,7 @@
 | item (16) | popularity 1/7/28 วัน, trend, unique users, อายุ, conversion แบบ smoothed, category, available | batch อย่างเดียว |
 | category (3) | popularity ของหมวด, จำนวนสินค้า | รวมจาก item features |
 | pair (5) | user เคย view/cart/buy สินค้านี้กี่ครั้ง, ห่างกี่วัน, สัดส่วนหมวดที่ผู้ใช้สนใจ | คำนวณตอนให้คะแนน candidate |
+| candidate (3) | คะแนน ALS, อันดับที่ดึงมา, ดึงจาก ALS หรือ popular fallback | เพิ่มตอนทำขั้น 6 |
 
 **ตัดสินใจสำคัญ:**
 - **offline = online:** user features แยกเป็น state (counts, เวลาแรก/ล่าสุด, decayed sums, 20 item ล่าสุด) กับ `derive` (recency, ratio) ไม่เก็บค่าอย่าง "days since last" เพราะเก่าทันทีที่เขียน `update_user_state` (ทีละ event สำหรับ consumer) ให้ผลเท่ากับ batch ตาม test
@@ -149,7 +150,44 @@
 - **Session features วัดผลไม่ได้ในโปรโตคอลนี้:** เราทำนาย 7 วันข้างหน้าจาก snapshot ต้นช่วง "session ปัจจุบัน" จึงเก่าหรือว่าง ฟีเจอร์ `recent_items` และ state ทำไว้เพื่อให้ตรงกับ Redis แต่ไม่ควรคาดหวังว่าจะเห็นผลบน Val
 - Pair features ช่วยได้เฉพาะถ้า candidate set ไม่ตัดสินค้าที่ผู้ใช้เคยดูออก (ต้องระวังตอนทำ ALS + Ranker)
 
+## 6. ALS + Ranker
+โค้ด: [src/training/](../src/training/) วิธีรันอยู่ใน [runbook-training.md](runbook-training.md) (`make tune-als`, `make train`, `make mlflow-ui`)
+
+**ไหลของการเทรน:**
+
+1. **ALS** (`implicit`) เทรนจาก interaction ที่ถ่วงน้ำหนัก (view 1 / addtocart 3 / transaction 5) ของผู้ใช้/สินค้าที่มี event >= 2 ครั้ง ให้ score ด้วย dot product ของ factors (serving ใช้แค่ numpy ไม่ต้องมี `implicit`)
+2. **Candidate 200 ตัวต่อผู้ใช้:** ผู้ใช้ที่ ALS รู้จักได้จาก ALS (ไม่ตัดสินค้าที่เคยดูออก) ที่เหลือ (cold) ได้ popular 7 วันล่าสุดเป็น fallback
+3. **Ranker:** LightGBM LambdaRank เรียง 200 ตัวนั้นใหม่ด้วยฟีเจอร์ 38 ตัว เทรนบน 4 snapshot ต่อเนื่อง (`rank_4`..`rank_1`) โดย early stopping บน snapshot ใหม่สุด แล้ว refit ทั้งหมด
+4. **Evaluation gate:** บน Val โมเดลใหม่ต้องมี NDCG@10 ดีกว่า champion เดิม (หรือ popular_7d ถ้ายังไม่มี) และ Recall@200 ไม่แย่ลง
+5. **MLflow:** log params, metrics, tags (git commit, hash ข้อมูล) และ bundle (`als.npz`, `ranker.txt`, `schema.json`, `popular.json`) ถ้าผ่าน gate ลงทะเบียนเวอร์ชันและย้าย alias `champion` (ใช้ SQLite เป็น backend จึงมี Registry โดยไม่ต้องมี server)
+
+**จูน ALS** (`reports/als_tuning.md`): ลอง 12 ชุด ได้ factors 128 / regularization 0.01 / alpha 40 (Recall@200 0.37 เทียบกับ 0.33 ของ factors 64 บนผู้ใช้ที่ ALS รู้จัก)
+
+**ผลบน Val** (n = 1,941: warm 289, cold 1,652 ดูตารางเต็มที่ [reports/train_val.md](../reports/train_val.md)):
+
+| Model | NDCG@10 | Recall@10 | Recall@200 |
+| --- | --- | --- | --- |
+| popular_7d | 0.0102 | 0.0191 | 0.1032 |
+| ALS | 0.0170 | 0.0295 | 0.1263 |
+| **ALS + Ranker** | **0.0333** | **0.0438** | 0.1263 |
+
+| กลุ่ม | NDCG@10: popular_7d → ALS → ALS + Ranker |
+| --- | --- |
+| warm (289) | 0.0090 → 0.0550 → **0.1318** |
+| cold (1,652) | 0.0104 → 0.0104 → **0.0160** |
+
+- **Gate: ผ่าน** ลงทะเบียน `recsys-bundle` v1 และตั้ง alias `champion`
+- NDCG@10 รวมสูงกว่า baseline ~3.3 เท่า และช่วงความเชื่อมั่นไม่ทับกับ baseline
+- Recall@200 ของ ALS และ ALS + Ranker เท่ากัน เพราะ Ranker แค่เรียง 200 ตัวเดิมใหม่
+
+**ข้อสังเกตและข้อจำกัด:**
+- **ผู้ใช้ส่วนใหญ่เป็น cold** ALS รู้จักผู้ใช้แค่ ~10-15% ของผู้ใช้ที่วัด จึงไม่ช่วยกลุ่ม cold เลย (ผลเท่า baseline) ส่วนที่ดีขึ้นของกลุ่ม cold (0.0104 → 0.0160) มาจาก Ranker ที่เรียง popular ใหม่ด้วยฟีเจอร์สินค้า และช่วงความเชื่อมั่นยังทับกับ baseline เล็กน้อย
+- **กลุ่ม warm ดีขึ้นมาก** ส่วนใหญ่มาจาก pair features (ผู้ใช้เคยดู/ใส่ตะกร้าสินค้านั้นมาก่อน) ซึ่งสะท้อนพฤติกรรมกลับมาซื้อซ้ำ ไม่ใช่การค้นพบสินค้าใหม่
+- **ข้อมูลเทรน Ranker น้อย:** ~1,100 ผู้ใช้ที่มี label ตรงกับสินค้าใน candidate (จาก 4 snapshot) ตัวเลข `ranker_holdout_ndcg10` ใน MLflow (~0.31) วัดเฉพาะผู้ใช้ที่มี label จึงสูงกว่าผลจริงบน Val และเทียบกันไม่ได้
+- **จูน ALS วัดจากผู้ใช้ 182 คน** และค่าที่ดีที่สุด (factors 128) อยู่ขอบของตาราง ยังลอง 256 ได้
+- Val ถูกใช้ทั้งจูนและตัดสิน gate จึงมีความเอนเอียงเล็กน้อย ตัวเลขที่เชื่อได้จริงคือ Test ซึ่ง **ยังไม่ได้แตะ**
+
 ---
 
 ## ขั้นต่อไป
-**6. ALS + Ranker:** เทรน ALS ดึง candidate 200 ตัว แล้วเทรน LightGBM LambdaRank บน snapshot `rank_train` ต้องชนะ baseline (NDCG@10 > 0.0102, Recall@200 > 0.1032) พร้อม log ลง MLflow
+**7. Serving, Streaming, Docker:** FastAPI (`/recommend`, `/health`, `/metrics`, `/admin/reload`) โหลด bundle ที่ alias `champion`, Kafka → Redis อัปเดตฟีเจอร์ผู้ใช้ด้วย `update_user_state`, รันทั้งระบบด้วย Docker Compose
