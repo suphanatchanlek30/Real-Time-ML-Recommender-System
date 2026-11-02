@@ -45,7 +45,7 @@ def evaluate_model(recs, truth, groups, catalog_size):
 
 
 def to_markdown(split: str, results: dict, meta: dict) -> str:
-    lines = [f"# Baseline results on {split}", ""]
+    lines = [f"# Results on {split}", ""]
     lines += [
         f"- Evaluated users: {meta['n_users']:,} "
         f"(warm {meta['n_warm']:,}, cold {meta['n_cold']:,})",

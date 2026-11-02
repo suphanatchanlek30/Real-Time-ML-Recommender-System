@@ -1,4 +1,4 @@
-# Baseline results on val
+# Results on val
 
 - Evaluated users: 1,941 (warm 289, cold 1,652)
 - Ground truth: items added to cart or bought during the val period

@@ -1,0 +1,5 @@
+# Training dependencies (on top of requirements.txt). Use Python 3.11 or 3.12.
+scipy
+implicit
+lightgbm
+mlflow

@@ -24,7 +24,7 @@ DTYPES = {"int": pl.Int64, "float": pl.Float64}
 class Feature:
     name: str
     dtype: str  # "int" or "float"
-    group: str  # user | item | category | pair
+    group: str  # user | item | category | pair | candidate
     desc: str
     min: float | None = None
     max: float | None = None
@@ -85,8 +85,16 @@ FEATURES = [
         min=0,
         max=1,
     ),
+    # --- candidate generation (how the item was retrieved) ---
+    Feature(
+        "a_score", "float", "candidate", "ALS score (null for popular fallback)", nullable=True
+    ),
+    Feature("a_rank", "int", "candidate", "position in the retrieved list (1 = best)", min=1),
+    Feature(
+        "a_source", "int", "candidate", "1 = ALS candidate, 0 = popular fallback", min=0, max=1
+    ),
 ]
-GROUPS = ("user", "item", "category", "pair")
+GROUPS = ("user", "item", "category", "pair", "candidate")
 FEATURE_COLUMNS = [f.name for f in FEATURES]  # model input order
 BY_GROUP = {g: [f for f in FEATURES if f.group == g] for g in GROUPS}
 
